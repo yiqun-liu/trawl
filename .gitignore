@@ -1,0 +1,18 @@
+# Build artifacts
+/target/
+
+# Temporary work directory
+/.tmp/
+
+# Editor directories
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Agent local overrides (per-developer, untracked)
+.AGENTS.md
