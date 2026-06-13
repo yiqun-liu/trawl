@@ -6,6 +6,8 @@
 
 pub mod config;
 pub mod model;
+pub mod scanner;
 
 pub use config::Config;
 pub use model::{Goal, GoalItem, InlineTask, Metadata, Priority, Span, Status};
+pub use scanner::{FileContents, ScanOptions};
