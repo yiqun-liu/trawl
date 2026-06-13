@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::Parser;
 
-use trawl::Config;
+use trawl::{scan, Config, InlineTask, ParseContext, Priority, ScanOptions, ScanResult, Status};
 
 /// TODO Repository Annotation Work List.
 ///
@@ -34,14 +34,76 @@ fn main() -> Result<()> {
     let config = Config::load(&cli.path)?;
     log::debug!("loaded config: {} keywords", config.scan.keywords.len());
 
-    // The scanner and parsers arrive in later slices. For now, report that
-    // configuration loaded successfully so the CLI is exercised end to end.
-    eprintln!(
-        "trawl: ready ({} keywords, {} goal section names)",
-        config.scan.keywords.len(),
-        config.scan.goal_section_names.len()
-    );
+    let options = ScanOptions::from_config(cli.path.clone(), &config)?;
+    let ctx = ParseContext::from_config(&config)?;
+    let result = scan(&options, &ctx)?;
+
+    print_summary(&result);
     Ok(())
+}
+
+/// Print a concise summary of the scan to stdout (the TUI replaces this later).
+fn print_summary(result: &ScanResult) {
+    println!("goals: {}", result.goals.len());
+
+    for goal in &result.goals {
+        let pct = (goal.progress() * 100.0).round() as u32;
+        println!(
+            "  [{:>8}] {:>3}%  {}  —  {}",
+            status_label(goal.status()),
+            pct,
+            goal.title,
+            goal.badge
+        );
+    }
+
+    let (high, med, low, other, untagged) = priority_breakdown(&result.inline_tasks);
+    println!(
+        "inline tasks: {}  (high:{} med:{} low:{} other:{} untagged:{})",
+        result.inline_tasks.len(),
+        high,
+        med,
+        low,
+        other,
+        untagged
+    );
+    for task in &result.inline_tasks {
+        let scope = task
+            .scope
+            .as_deref()
+            .map(|s| format!("({s})"))
+            .unwrap_or_default();
+        println!(
+            "  {}:{}  {}{}  {}",
+            task.span.path.display(),
+            task.span.line,
+            task.keyword,
+            scope,
+            task.description
+        );
+    }
+}
+
+fn status_label(status: Status) -> &'static str {
+    match status {
+        Status::Planned => "planned",
+        Status::Active => "active",
+        Status::Completed => "done",
+    }
+}
+
+fn priority_breakdown(tasks: &[InlineTask]) -> (usize, usize, usize, usize, usize) {
+    let (mut high, mut med, mut low, mut other, mut untagged) = (0, 0, 0, 0, 0);
+    for t in tasks {
+        match &t.metadata.priority {
+            Some(Priority::High) => high += 1,
+            Some(Priority::Med) => med += 1,
+            Some(Priority::Low) => low += 1,
+            Some(Priority::Other(_)) => other += 1,
+            None => untagged += 1,
+        }
+    }
+    (high, med, low, other, untagged)
 }
 
 /// Initialize the logger. `verbose` selects `debug`, otherwise `warn`.

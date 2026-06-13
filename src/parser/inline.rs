@@ -59,13 +59,17 @@ pub fn parse_line(
 }
 
 /// Parse every line of a file into inline tasks, preserving line numbers.
-pub fn parse_file(contents: &FileContents, ctx: &ParseContext) -> Vec<InlineTask> {
-    contents
-        .content
+pub fn parse_content(content: &str, path: &Path, ctx: &ParseContext) -> Vec<InlineTask> {
+    content
         .lines()
         .enumerate()
-        .filter_map(|(i, line)| parse_line(line, &contents.path, i + 1, ctx))
+        .filter_map(|(i, line)| parse_line(line, path, i + 1, ctx))
         .collect()
+}
+
+/// Parse every line of a [`FileContents`] into inline tasks.
+pub fn parse_file(contents: &FileContents, ctx: &ParseContext) -> Vec<InlineTask> {
+    parse_content(&contents.content, &contents.path, ctx)
 }
 
 /// Strip a trailing block-comment closer (`*/` or `-->`) so descriptions like

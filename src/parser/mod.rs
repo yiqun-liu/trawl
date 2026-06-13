@@ -11,8 +11,8 @@ use regex::Regex;
 use crate::config::Config;
 use crate::model::Priority;
 
+pub mod goal;
 pub mod inline;
-// pub mod goal; // arrives in a later slice
 
 /// Shared parsing context, compiled once from configuration.
 #[derive(Debug)]
@@ -23,6 +23,10 @@ pub struct ParseContext {
     keyword_priorities: HashMap<String, Priority>,
     /// Token field → prefix (e.g. `owner → "@"`).
     tokens: HashMap<String, String>,
+    /// Goal section heading names to detect (e.g. `GOAL TRACKER`).
+    goal_section_names: Vec<String>,
+    /// Table header field → keyword list, for column mapping.
+    headers: HashMap<String, Vec<String>>,
 }
 
 impl ParseContext {
@@ -52,6 +56,8 @@ impl ParseContext {
             keyword_re,
             keyword_priorities,
             tokens: config.tokens.clone(),
+            goal_section_names: config.scan.goal_section_names.clone(),
+            headers: config.headers.clone(),
         })
     }
 
@@ -71,5 +77,15 @@ impl ParseContext {
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(keyword))
             .map(|(_, v)| v.clone())
+    }
+
+    /// Goal section heading names to detect.
+    pub(crate) fn goal_section_names(&self) -> &[String] {
+        &self.goal_section_names
+    }
+
+    /// Table header field → keyword list.
+    pub(crate) fn headers(&self) -> &HashMap<String, Vec<String>> {
+        &self.headers
     }
 }
