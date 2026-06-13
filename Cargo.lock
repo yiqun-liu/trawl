@@ -661,6 +661,7 @@ dependencies = [
  "ignore",
  "log",
  "rayon",
+ "regex",
  "serde",
  "tempfile",
  "toml",

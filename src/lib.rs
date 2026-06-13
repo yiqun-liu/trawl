@@ -5,9 +5,12 @@
 //! entry point lives in `main.rs`.
 
 pub mod config;
+pub mod metadata;
 pub mod model;
+pub mod parser;
 pub mod scanner;
 
 pub use config::Config;
 pub use model::{Goal, GoalItem, InlineTask, Metadata, Priority, Span, Status};
+pub use parser::ParseContext;
 pub use scanner::{FileContents, ScanOptions};
