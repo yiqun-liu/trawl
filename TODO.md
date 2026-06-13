@@ -32,41 +32,41 @@ For syntax specification, see `docs/syntax.md`.
 
 ### Phase 1 — MVP
 
-- [ ] Project Scaffold
-  - [ ] Create `Cargo.toml` with dependencies (ratatui, crossterm, clap, ignore, regex, serde, toml, rayon, git2, chrono, anyhow, log, env_logger)
-  - [ ] Define module layout (`src/scanner/`, `src/parser/`, `src/tui/`, `src/config.rs`, `src/main.rs`)
-  - [ ] Implement CLI argument parsing with clap (`--path`, `--verbose`, etc.)
-  - [ ] Implement layered config loading (`~/.config/trawl/config.toml` + `<repo>/.trawl.toml`)
-  - [ ] Define core data types (`Goal`, `TaskNode`, `InlineTask`, `Metadata`)
-  - [ ] Add `rustfmt.toml` and verify `cargo fmt` / `cargo clippy` pass
-- [ ] Scanner
-  - [ ] Implement recursive directory walk using `ignore` crate
-  - [ ] Implement binary detection (null byte heuristic)
-  - [ ] Implement file type filtering via layered pipeline
-  - [ ] Implement parallel file reading with `rayon`
-  - [ ] Wire scanner output to both parsers in a single pass
-  - [ ] Implement keyword line matching via `regex` crate (`grep-searcher` deferred to optimization)
-- [ ] Inline Task Parser
-  - [ ] Implement keyword matching (configurable keyword list)
-  - [ ] Implement scope extraction `(name)`
-  - [ ] Implement metadata token extraction (`@owner`, `#tag`, `!priority`, `~due`)
-  - [ ] Implement backward-compatible parsing (fully structured to bare keyword)
-  - [ ] Implement markdown heading stripping (`## TODO:` to `TODO:`)
-  - [ ] Apply keyword default priorities (`FIXME` to high, `HACK` to med, etc.)
-  - [ ] Add test fixtures for all five parsing forms
-  - [ ] Add test fixtures for all comment contexts (C, Python, shell, markdown)
-- [ ] Goal Tracker Parser
-  - [ ] Implement section detection (heading match, section boundary by heading level)
-  - [ ] Implement checkbox tree parsing (indentation-based hierarchy)
-  - [ ] Implement milestone vs task distinction (has children = milestone)
-  - [ ] Implement table format parsing (column detection by header keywords)
-  - [ ] Implement table done heuristic (`NOT (empty OR contains "TODO")`)
-  - [ ] Implement mixed format (checkbox lists + tables in same section)
-  - [ ] Implement metadata token extraction from task descriptions and table cells
-  - [ ] Implement progress calculation (leaf task ratio)
-  - [ ] Implement derived fields (title from H1, status from progress)
-  - [ ] Implement location badge derivation (super directory path)
-  - [ ] Add test fixtures for checkbox trees, tables, mixed format, edge cases
+- [x] Project Scaffold
+  - [x] Create `Cargo.toml` with dependencies (ratatui, crossterm, clap, ignore, regex, serde, toml, rayon, git2, chrono, anyhow, log, env_logger)
+  - [x] Define module layout (`src/scanner/`, `src/parser/`, `src/tui/`, `src/config.rs`, `src/main.rs`)
+  - [x] Implement CLI argument parsing with clap (`--path`, `--verbose`, etc.)
+  - [x] Implement layered config loading (`~/.config/trawl/config.toml` + `<repo>/.trawl.toml`)
+  - [x] Define core data types (`Goal`, `TaskNode`, `InlineTask`, `Metadata`)
+  - [x] Add `rustfmt.toml` and verify `cargo fmt` / `cargo clippy` pass
+- [x] Scanner
+  - [x] Implement recursive directory walk using `ignore` crate
+  - [x] Implement binary detection (null byte heuristic)
+  - [x] Implement file type filtering via layered pipeline
+  - [x] Implement parallel file reading with `rayon`
+  - [x] Wire scanner output to both parsers in a single pass
+  - [x] Implement keyword line matching via `regex` crate (`grep-searcher` deferred to optimization)
+- [x] Inline Task Parser
+  - [x] Implement keyword matching (configurable keyword list)
+  - [x] Implement scope extraction `(name)`
+  - [x] Implement metadata token extraction (`@owner`, `#tag`, `!priority`, `~due`)
+  - [x] Implement backward-compatible parsing (fully structured to bare keyword)
+  - [x] Implement markdown heading stripping (`## TODO:` to `TODO:`)
+  - [x] Apply keyword default priorities (`FIXME` to high, `HACK` to med, etc.)
+  - [x] Add test fixtures for all five parsing forms
+  - [x] Add test fixtures for all comment contexts (C, Python, shell, markdown)
+- [x] Goal Tracker Parser
+  - [x] Implement section detection (heading match, section boundary by heading level)
+  - [x] Implement checkbox tree parsing (indentation-based hierarchy)
+  - [x] Implement milestone vs task distinction (has children = milestone)
+  - [x] Implement table format parsing (column detection by header keywords)
+  - [x] Implement table done heuristic (`NOT (empty OR contains "TODO")`)
+  - [x] Implement mixed format (checkbox lists + tables in same section)
+  - [x] Implement metadata token extraction from task descriptions and table cells
+  - [x] Implement progress calculation (leaf task ratio)
+  - [x] Implement derived fields (title from H1, status from progress)
+  - [x] Implement location badge derivation (super directory path)
+  - [x] Add test fixtures for checkbox trees, tables, mixed format, edge cases
 - [ ] TUI Framework
   - [ ] Initialize ratatui terminal with crossterm backend
   - [ ] Implement event loop (keyboard input via crossterm events)
