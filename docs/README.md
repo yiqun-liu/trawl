@@ -16,6 +16,8 @@ This directory contains project documentation.
 - `guidelines.md` — development guidelines and commit message conventions
 - `TODO.md` (repository root) — implementation tracker using goal tracker
   syntax, with phase breakdown and per-item details
+- `design/architecture.md` — implementation-level design: module layout,
+  data model, scanner pipeline, parser strategies, and key tradeoffs
 
 ## Agent Guidance
 

@@ -206,7 +206,7 @@ TODO: add examples for cache types #arch
 | Max file size | Skip files above threshold (default: 1 MB) |
 | Parallel scanning | Multi-threaded file reading (via `rayon`) |
 | Both types in one pass | Goals and inline tasks discovered in the same scan |
-| Ripgrep-class speed | Uses `grep-searcher` + `grep-regex` crates for SIMD-accelerated pattern matching |
+| Keyword matching | Finds keyword lines via the `regex` crate; `grep-searcher`/`grep-regex` deferred as a later optimization for very large monorepos |
 
 ### TUI — Goals & Milestones View
 
@@ -470,7 +470,8 @@ stats dashboard view
 | `ratatui` + `crossterm` | TUI rendering + terminal backend |
 | `clap` | CLI argument parsing |
 | `ignore` | `.gitignore`-aware directory walking |
-| `grep-searcher` + `grep-regex` | Ripgrep-class fast pattern matching |
+| `regex` | Keyword line matching (fast enough at repo scale) |
+| `grep-searcher` + `grep-regex` | Ripgrep-class matching — planned optimization for very large monorepos |
 | `serde` + `toml` | Config file deserialization |
 | `git2` | libgit2 bindings for blame |
 | `chrono` | Date handling |

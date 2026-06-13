@@ -33,7 +33,7 @@ For syntax specification, see `docs/syntax.md`.
 ### Phase 1 — MVP
 
 - [ ] Project Scaffold
-  - [ ] Create `Cargo.toml` with dependencies (ratatui, crossterm, clap, ignore, grep-searcher, grep-regex, serde, toml, rayon, git2, chrono)
+  - [ ] Create `Cargo.toml` with dependencies (ratatui, crossterm, clap, ignore, regex, serde, toml, rayon, git2, chrono, anyhow, log, env_logger)
   - [ ] Define module layout (`src/scanner/`, `src/parser/`, `src/tui/`, `src/config.rs`, `src/main.rs`)
   - [ ] Implement CLI argument parsing with clap (`--path`, `--verbose`, etc.)
   - [ ] Implement layered config loading (`~/.config/trawl/config.toml` + `<repo>/.trawl.toml`)
@@ -45,7 +45,7 @@ For syntax specification, see `docs/syntax.md`.
   - [ ] Implement file type filtering via layered pipeline
   - [ ] Implement parallel file reading with `rayon`
   - [ ] Wire scanner output to both parsers in a single pass
-  - [ ] Implement keyword line matching via `grep-searcher` + `grep-regex` (ripgrep-class SIMD matching)
+  - [ ] Implement keyword line matching via `regex` crate (`grep-searcher` deferred to optimization)
 - [ ] Inline Task Parser
   - [ ] Implement keyword matching (configurable keyword list)
   - [ ] Implement scope extraction `(name)`
