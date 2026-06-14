@@ -263,8 +263,13 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
         super::SortMode::Priority => "priority",
         super::SortMode::Keyword => "keyword",
     };
+    let stale_count = app
+        .inline_displayed
+        .iter()
+        .filter(|t| t.is_stale(365))
+        .count();
     let title = format!(
-        "Inline Tasks  ({count})  [{sort_label}]  high:{high} med:{med} low:{low} untagged:{untagged}"
+        "Inline Tasks  ({count})  [{sort_label}]  high:{high} med:{med} low:{low} untagged:{untagged} stale:{stale_count}"
     );
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
