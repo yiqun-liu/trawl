@@ -17,10 +17,10 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::Line,
-    widgets::Paragraph,
+    widgets::{Clear, Paragraph},
     Frame, Terminal,
 };
 
@@ -105,6 +105,16 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         return;
     }
 
+    // The help overlay is modal: only `?`/Esc close it, `q` quits.
+    if app.show_help {
+        match key.code {
+            KeyCode::Char('?') | KeyCode::Esc => app.show_help = false,
+            KeyCode::Char('q') | KeyCode::Char('Q') => app.quit = true,
+            _ => {}
+        }
+        return;
+    }
+
     if app.mode == Mode::FilterInput {
         match key.code {
             KeyCode::Enter => app.apply_filter(),
@@ -130,6 +140,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('Z') => app.collapse_all(),
         KeyCode::Char('f') => app.begin_filter(),
         KeyCode::Esc => app.clear_filter(),
+        KeyCode::Char('?') => app.show_help = true,
         _ => {}
     }
 }
@@ -164,6 +175,72 @@ fn draw(f: &mut Frame, app: &App) {
     let footer_widget = Paragraph::new(Line::from(footer_text))
         .style(Style::default().add_modifier(Modifier::REVERSED));
     f.render_widget(footer_widget, footer);
+
+    if app.show_help {
+        draw_help(f, app.view);
+    }
+}
+
+/// Render the modal help overlay on top of the current view.
+fn draw_help(f: &mut Frame, view: View) {
+    let area = centered_rect(64, 80, f.area());
+    f.render_widget(Clear, area);
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .title("Keybindings  (press ? or Esc to close)");
+    f.render_widget(
+        ratatui::widgets::Paragraph::new(help_text(view)).block(block),
+        area,
+    );
+}
+
+/// Per-view keybinding text for the help overlay.
+fn help_text(view: View) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from("Navigation"),
+        Line::from("  j / k        move down / up"),
+        Line::from("  l / h        expand / collapse"),
+        Line::from("  Enter        toggle  (on a leaf, toggles its parent)"),
+        Line::from("  Tab          switch Goals <-> Inline Tasks"),
+        Line::from(""),
+        Line::from("Goals & Milestones"),
+        Line::from("  C            collapse fully-complete nodes"),
+        Line::from("  Z            collapse all (current view)"),
+    ];
+    if view == View::Inline {
+        lines.push(Line::from(""));
+        lines.push(Line::from("Inline tasks"));
+        lines.push(Line::from("  f            filter prompt"));
+        lines.push(Line::from(
+            "               (kw: pri: tag: owner: path: <text>)",
+        ));
+        lines.push(Line::from("  Esc          clear filter"));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from("  ?            toggle this help"));
+    lines.push(Line::from("  q / Ctrl+C   quit"));
+    lines
+}
+
+/// A rectangle centered in `area`, `pct_x`% wide and `pct_y`% tall.
+fn centered_rect(pct_x: u16, pct_y: u16, area: Rect) -> Rect {
+    let [_top, mid, _bottom] = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - pct_y) / 2),
+            Constraint::Percentage(pct_y),
+            Constraint::Percentage((100 - pct_y) / 2),
+        ])
+        .areas(area);
+    let [_left, center, _right] = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - pct_x) / 2),
+            Constraint::Percentage(pct_x),
+            Constraint::Percentage((100 - pct_x) / 2),
+        ])
+        .areas(mid);
+    center
 }
 
 /// Application state for the TUI.
@@ -184,6 +261,7 @@ struct App {
     inline_selected: usize,
     expanded_inline: HashSet<String>,
     quit: bool,
+    show_help: bool,
 }
 
 impl App {
@@ -213,6 +291,7 @@ impl App {
             inline_selected: 0,
             expanded_inline,
             quit: false,
+            show_help: false,
         }
     }
 
