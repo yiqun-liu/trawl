@@ -250,9 +250,8 @@ impl App {
         }
     }
 
-    /// Recompute the displayed inline tasks from the current filter and
-    /// rebuild the tree/rows. The user's expand choices are preserved; keys
-    /// for directories that no longer exist are ignored by the flattener.
+    /// Recompute the displayed inline tasks from the current filter, then
+    /// rebuild the tree/rows. Called when the filter changes.
     fn rebuild_inline(&mut self) {
         self.inline_displayed = match &self.filter {
             None => self.inline_tasks.clone(),
@@ -263,17 +262,23 @@ impl App {
                 .cloned()
                 .collect(),
         };
+        self.rebuild_inline_rows();
+        if !self.inline_rows.is_empty() {
+            self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
+        } else {
+            self.inline_selected = 0;
+        }
+    }
+
+    /// Rebuild the inline tree/rows from the currently displayed tasks. Does
+    /// not refilter; called after expand/collapse.
+    fn rebuild_inline_rows(&mut self) {
         self.inline_root = build_tree(&self.inline_displayed);
         self.inline_rows = flatten_inline(
             &self.inline_root,
             &self.inline_displayed,
             &self.expanded_inline,
         );
-        if !self.inline_rows.is_empty() {
-            self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
-        } else {
-            self.inline_selected = 0;
-        }
     }
 
     fn toggle_view(&mut self) {
@@ -303,47 +308,67 @@ impl App {
     }
 
     fn expand_selected(&mut self) {
-        match self.view {
-            View::Goals => {
-                if let Some(key) = self.selected_goal_key() {
-                    if self.goal_expanded.insert(key) {
-                        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
-                    }
-                }
-            }
-            View::Inline => {
-                if let Some(key) = self.selected_inline_key() {
-                    if self.expanded_inline.insert(key) {
-                        self.inline_rows = flatten_inline(
-                            &self.inline_root,
-                            &self.inline_tasks,
-                            &self.expanded_inline,
-                        );
-                    }
-                }
-            }
+        let Some(key) = self.current_key() else {
+            return;
+        };
+        let newly = match self.view {
+            View::Goals => self.goal_expanded.insert(key.clone()),
+            View::Inline => self.expanded_inline.insert(key.clone()),
+        };
+        if newly {
+            self.rebuild_active();
         }
     }
 
     fn collapse_selected(&mut self) {
+        let Some(key) = self.current_key() else {
+            return;
+        };
+        let was_open = match self.view {
+            View::Goals => self.goal_expanded.remove(&key),
+            View::Inline => self.expanded_inline.remove(&key),
+        };
+        if was_open {
+            self.rebuild_active();
+            self.seek_cursor(&key);
+        }
+    }
+
+    /// The key of the selected row in the active view. For a leaf, this is
+    /// its parent's key, so expand/collapse/toggle act on the parent.
+    fn current_key(&self) -> Option<String> {
+        match self.view {
+            View::Goals => self.selected_goal_key(),
+            View::Inline => self.selected_inline_key(),
+        }
+    }
+
+    /// Rebuild the active view's rows from its expand set.
+    fn rebuild_active(&mut self) {
         match self.view {
             View::Goals => {
-                if let Some(key) = self.selected_goal_key() {
-                    if self.goal_expanded.remove(&key) {
-                        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
-                    }
-                }
+                self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
             }
-            View::Inline => {
-                if let Some(key) = self.selected_inline_key() {
-                    if self.expanded_inline.remove(&key) {
-                        self.inline_rows = flatten_inline(
-                            &self.inline_root,
-                            &self.inline_tasks,
-                            &self.expanded_inline,
-                        );
-                    }
-                }
+            View::Inline => self.rebuild_inline_rows(),
+        }
+    }
+
+    /// Move the active-view cursor onto the row whose node key is `key`.
+    fn seek_cursor(&mut self, key: &str) {
+        let pos = match self.view {
+            View::Goals => self
+                .goal_rows
+                .iter()
+                .position(|r| goal_row_node_key(r).is_some_and(|k| k == key)),
+            View::Inline => self
+                .inline_rows
+                .iter()
+                .position(|r| inline_row_node_key(r).is_some_and(|k| k == key)),
+        };
+        if let Some(i) = pos {
+            match self.view {
+                View::Goals => self.goal_selected = i,
+                View::Inline => self.inline_selected = i,
             }
         }
     }
@@ -361,58 +386,75 @@ impl App {
         }
     }
 
-    /// Enter: toggle the selected foldable node (fold ↔ unfold).
+    /// Enter: toggle the selected node (fold ↔ unfold). On a leaf, toggles
+    /// the parent and moves the cursor onto it.
     fn toggle_selected(&mut self) {
-        match self.view {
+        let Some(key) = self.current_key() else {
+            return;
+        };
+        let now_open = match self.view {
             View::Goals => {
-                if let Some(key) = self.selected_goal_key() {
-                    if self.goal_expanded.contains(&key) {
-                        self.goal_expanded.remove(&key);
-                    } else {
-                        self.goal_expanded.insert(key);
-                    }
-                    self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
+                if self.goal_expanded.contains(&key) {
+                    self.goal_expanded.remove(&key);
+                    false
+                } else {
+                    self.goal_expanded.insert(key.clone());
+                    true
                 }
             }
             View::Inline => {
-                if let Some(key) = self.selected_inline_key() {
-                    if self.expanded_inline.contains(&key) {
-                        self.expanded_inline.remove(&key);
-                    } else {
-                        self.expanded_inline.insert(key);
-                    }
-                    self.inline_rows = flatten_inline(
-                        &self.inline_root,
-                        &self.inline_tasks,
-                        &self.expanded_inline,
-                    );
+                if self.expanded_inline.contains(&key) {
+                    self.expanded_inline.remove(&key);
+                    false
+                } else {
+                    self.expanded_inline.insert(key.clone());
+                    true
                 }
             }
+        };
+        self.rebuild_active();
+        if !now_open {
+            self.seek_cursor(&key);
         }
     }
 
-    /// If the selected goals-view row is foldable (header or milestone),
-    /// return its key.
+    /// The key of the selected goals-view row. For a leaf task, returns its
+    /// parent milestone/goal key so fold actions target the parent.
     fn selected_goal_key(&self) -> Option<String> {
         self.goal_rows
             .get(self.goal_selected)
-            .and_then(|row| match &row.kind {
-                GoalRowKind::Header { key, .. } | GoalRowKind::Milestone { key } => {
-                    Some(key.clone())
-                }
-                GoalRowKind::Task => None,
+            .map(|row| match &row.kind {
+                GoalRowKind::Header { key, .. } | GoalRowKind::Milestone { key } => key.clone(),
+                GoalRowKind::Task { parent_key } => parent_key.clone(),
             })
     }
 
-    /// If the selected inline-view row is a directory or file, return its key.
+    /// The key of the selected inline-view row. For a leaf task, returns its
+    /// file's key so fold actions target the file.
     fn selected_inline_key(&self) -> Option<String> {
         self.inline_rows
             .get(self.inline_selected)
-            .and_then(|row| match &row.kind {
+            .map(|row| match &row.kind {
                 inline_view::InlineRowKind::Dir(k) | inline_view::InlineRowKind::File(k) => {
-                    Some(k.clone())
+                    k.clone()
                 }
-                inline_view::InlineRowKind::Task => None,
+                inline_view::InlineRowKind::Task { parent_key } => parent_key.clone(),
             })
+    }
+}
+
+/// The foldable key of a goals-view row, or `None` for leaves.
+fn goal_row_node_key(row: &GoalRow) -> Option<&str> {
+    match &row.kind {
+        GoalRowKind::Header { key, .. } | GoalRowKind::Milestone { key } => Some(key),
+        GoalRowKind::Task { .. } => None,
+    }
+}
+
+/// The foldable key of an inline-view row, or `None` for leaves.
+fn inline_row_node_key(row: &InlineRow) -> Option<&str> {
+    match &row.kind {
+        inline_view::InlineRowKind::Dir(k) | inline_view::InlineRowKind::File(k) => Some(k),
+        inline_view::InlineRowKind::Task { .. } => None,
     }
 }

@@ -21,9 +21,18 @@ use crate::model::{Goal, GoalItem, Status};
 /// Which goal a row belongs to. Headers and milestones are foldable; tasks
 /// (leaves) are not.
 pub(super) enum GoalRowKind {
-    Header { key: String, completed: bool },
-    Milestone { key: String },
-    Task,
+    Header {
+        key: String,
+        completed: bool,
+    },
+    Milestone {
+        key: String,
+    },
+    /// A leaf task. `parent_key` is the foldable node it belongs to (a
+    /// milestone or the goal header), so expand/collapse act on the parent.
+    Task {
+        parent_key: String,
+    },
 }
 
 pub(super) struct GoalRow {
@@ -52,7 +61,7 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
         });
         if expanded.contains(&key) {
             for (ci, item) in goal.items.iter().enumerate() {
-                push_item(item, &format!("{key}/{ci}"), 1, expanded, &mut rows);
+                push_item(item, &format!("{key}/{ci}"), &key, 1, expanded, &mut rows);
             }
         }
     }
@@ -62,6 +71,7 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
 fn push_item(
     item: &GoalItem,
     key: &str,
+    parent_key: &str,
     depth: usize,
     expanded: &HashSet<String>,
     rows: &mut Vec<GoalRow>,
@@ -70,9 +80,11 @@ fn push_item(
     let check = if item.checked { 'x' } else { ' ' };
 
     if item.children.is_empty() {
-        // Leaf task: not foldable.
+        // Leaf task: not foldable; remembers its parent so keys act on it.
         rows.push(GoalRow {
-            kind: GoalRowKind::Task,
+            kind: GoalRowKind::Task {
+                parent_key: parent_key.to_string(),
+            },
             text: format!("{indent}[{check}] {}", item.text),
         });
     } else {
@@ -86,7 +98,14 @@ fn push_item(
         });
         if expanded.contains(key) {
             for (ci, child) in item.children.iter().enumerate() {
-                push_item(child, &format!("{key}/{ci}"), depth + 1, expanded, rows);
+                push_item(
+                    child,
+                    &format!("{key}/{ci}"),
+                    key,
+                    depth + 1,
+                    expanded,
+                    rows,
+                );
             }
         }
     }
@@ -215,8 +234,13 @@ mod tests {
         assert!(rows[1].text.starts_with("  ▼ [ ] week 1"));
         assert!(rows[2].text.contains("[x] task 1"));
         assert!(rows[3].text.contains("[ ] task 2"));
-        // tasks are indented one level deeper than the milestone
+        // indentation increases with depth
         assert!(rows[3].text.starts_with("    "));
+        // a leaf carries its parent milestone's key, so fold acts on the parent
+        assert!(matches!(
+            &rows[2].kind,
+            GoalRowKind::Task { parent_key } if parent_key == "g0/0"
+        ));
     }
 
     #[test]
