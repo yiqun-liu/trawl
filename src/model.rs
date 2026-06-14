@@ -120,6 +120,9 @@ pub struct GoalItem {
     pub metadata: Metadata,
     pub children: Vec<GoalItem>,
     pub span: Span,
+    pub blame_author: Option<String>,
+    pub blame_date: Option<NaiveDateTime>,
+    pub blame_commit: Option<String>,
 }
 
 impl GoalItem {
@@ -221,6 +224,9 @@ mod tests {
                 path: PathBuf::from("x.md"),
                 line: 1,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         }
     }
 
@@ -234,6 +240,9 @@ mod tests {
                 path: PathBuf::from("x.md"),
                 line: 1,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         }
     }
 

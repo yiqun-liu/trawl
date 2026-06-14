@@ -44,7 +44,11 @@ pub(super) struct GoalRow {
 
 /// Flatten goals into display rows according to the expand set.
 /// Uses two passes so all progress bars align at the same column.
-pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<GoalRow> {
+pub(super) fn flatten_goals(
+    goals: &[Goal],
+    expanded: &HashSet<String>,
+    show_blame: bool,
+) -> Vec<GoalRow> {
     if goals.is_empty() {
         return Vec::new();
     }
@@ -82,7 +86,15 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
         });
         if expanded.contains(&key) {
             for (ci, item) in goal.items.iter().enumerate() {
-                push_item(item, &format!("{key}/{ci}"), &key, 1, expanded, &mut rows);
+                push_item(
+                    item,
+                    &format!("{key}/{ci}"),
+                    &key,
+                    1,
+                    expanded,
+                    show_blame,
+                    &mut rows,
+                );
             }
         }
     }
@@ -165,6 +177,7 @@ fn push_item(
     parent_key: &str,
     depth: usize,
     expanded: &HashSet<String>,
+    show_blame: bool,
     rows: &mut Vec<GoalRow>,
 ) {
     let indent = "  ".repeat(depth);
@@ -175,6 +188,20 @@ fn push_item(
         .priority
         .as_ref()
         .map_or(String::new(), |p| format!("  [{}]", p.label()));
+    let blame_info = if show_blame {
+        match &item.blame_author {
+            Some(a) => {
+                let date = item
+                    .blame_date
+                    .map(|d| format!(" {}", d.format("%Y-%m-%d")))
+                    .unwrap_or_default();
+                format!("  ({a}{date})")
+            }
+            None => String::new(),
+        }
+    } else {
+        String::new()
+    };
 
     if item.children.is_empty() {
         // Leaf task: not foldable; remembers its parent so keys act on it.
@@ -183,7 +210,7 @@ fn push_item(
                 key: key.to_string(),
                 parent_key: parent_key.to_string(),
             },
-            text: format!("{indent}[{check}] {}{badge}", item.text),
+            text: format!("{indent}[{check}] {}{badge}{blame_info}", item.text),
             style,
         });
     } else {
@@ -196,7 +223,10 @@ fn push_item(
             kind: GoalRowKind::Milestone {
                 key: key.to_string(),
             },
-            text: format!("{indent}{marker} [{check}] {}{badge}{ratio}", item.text),
+            text: format!(
+                "{indent}{marker} [{check}] {}{badge}{ratio}{blame_info}",
+                item.text
+            ),
             style,
         });
         if expanded.contains(key) {
@@ -207,6 +237,7 @@ fn push_item(
                     key,
                     depth + 1,
                     expanded,
+                    show_blame,
                     rows,
                 );
             }
@@ -265,6 +296,9 @@ mod tests {
                 path: PathBuf::from("x.md"),
                 line: 1,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         }
     }
 
@@ -278,6 +312,9 @@ mod tests {
                 path: PathBuf::from("x.md"),
                 line: 1,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         }
     }
 
@@ -287,7 +324,7 @@ mod tests {
             goal("A", vec![leaf("a1", false)]),
             goal("B", vec![leaf("b1", false)]),
         ];
-        let rows = flatten_goals(&goals, &HashSet::new());
+        let rows = flatten_goals(&goals, &HashSet::new(), false);
         assert_eq!(rows.len(), 2);
         assert!(rows[0].text.starts_with("▸ A"));
         assert!(rows[1].text.starts_with("▸ B"));
@@ -305,7 +342,7 @@ mod tests {
         )];
         let mut expanded = HashSet::new();
         expanded.insert("g0".to_string());
-        let rows = flatten_goals(&goals, &expanded);
+        let rows = flatten_goals(&goals, &expanded, false);
         // header + milestone only (milestone's children stay folded)
         assert_eq!(rows.len(), 2);
         assert!(rows[1].text.contains("▸ [ ] week 1"));
@@ -324,7 +361,7 @@ mod tests {
         let mut expanded = HashSet::new();
         expanded.insert("g0".to_string());
         expanded.insert("g0/0".to_string());
-        let rows = flatten_goals(&goals, &expanded);
+        let rows = flatten_goals(&goals, &expanded, false);
         assert_eq!(rows.len(), 4); // header + milestone + 2 tasks
         assert!(rows[1].text.starts_with("  ▼ [ ] week 1"));
         assert!(rows[2].text.contains("[x] task 1"));
@@ -351,7 +388,7 @@ mod tests {
         let mut expanded = HashSet::new();
         expanded.insert("g0".to_string());
         expanded.insert("g0/0".to_string());
-        let rows = flatten_goals(&goals, &expanded);
+        let rows = flatten_goals(&goals, &expanded, false);
         // header + week1 + sub (folded); "deep" stays hidden under "sub"
         assert_eq!(rows.len(), 3);
         assert!(matches!(rows[2].kind, GoalRowKind::Milestone { .. }));
@@ -361,7 +398,7 @@ mod tests {
     #[test]
     fn header_text_includes_progress_and_badge() {
         let goals = vec![goal("A", vec![leaf("done", true)])];
-        let rows = flatten_goals(&goals, &HashSet::new());
+        let rows = flatten_goals(&goals, &HashSet::new(), false);
         assert!(rows[0].text.contains("100%"));
         assert!(rows[0].text.contains("(root)"));
     }
@@ -393,7 +430,7 @@ mod tests {
                 vec![leaf("b", false)],
             ),
         ];
-        let rows = flatten_goals(&goals, &HashSet::new());
+        let rows = flatten_goals(&goals, &HashSet::new(), false);
 
         let bar_starts: Vec<usize> = rows
             .iter()

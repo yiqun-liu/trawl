@@ -389,7 +389,7 @@ impl App {
         headers: HashMap<String, Vec<String>>,
     ) -> Self {
         let goal_expanded = HashSet::new();
-        let goal_rows = flatten_goals(&goals, &goal_expanded);
+        let goal_rows = flatten_goals(&goals, &goal_expanded, false);
 
         let inline_displayed = inline_tasks.clone();
         let inline_root = build_tree(&inline_displayed);
@@ -854,7 +854,7 @@ impl App {
         let anchor = self.cursor_id();
         match self.view {
             View::Goals => {
-                self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
+                self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded, self.show_blame);
             }
             View::Inline => self.rebuild_inline_rows(),
         }
@@ -1218,6 +1218,9 @@ mod tests {
                 path: PathBuf::from("x.md"),
                 line: 1,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         }
     }
 
@@ -1231,6 +1234,9 @@ mod tests {
                 path: PathBuf::from("x.md"),
                 line: 1,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         }
     }
 

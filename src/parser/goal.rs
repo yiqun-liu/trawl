@@ -90,6 +90,9 @@ fn parse_body(body: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> Vec<Goa
                     path: PathBuf::from(rel),
                     line: lineno,
                 },
+                blame_author: None,
+                blame_date: None,
+                blame_commit: None,
             };
             // Resolve parent: nearest ancestor with a strictly smaller level.
             while stack.last().is_some_and(|(lvl, _)| *lvl >= level) {
@@ -184,6 +187,9 @@ fn parse_table(block: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> (usiz
                 path: PathBuf::from(rel),
                 line: entry.0,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         });
     }
     (consumed, items)

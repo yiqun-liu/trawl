@@ -45,6 +45,7 @@ pub fn scan(options: &ScanOptions, ctx: &ParseContext) -> Result<ScanResult> {
     }
     if options.show_git_blame {
         let _ = blame::enrich_tasks(root, &mut inline_tasks);
+        let _ = blame::enrich_goals(root, &mut goals);
     }
     Ok(ScanResult {
         goals,
