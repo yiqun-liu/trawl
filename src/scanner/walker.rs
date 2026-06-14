@@ -93,7 +93,7 @@ fn accept(
     // Stage 2: untracked-filter — skip files not tracked by git.
     // Directories are always allowed through so the walker can descend.
     if let Some(set) = tracked {
-        if entry.file_type().map_or(false, |t| t.is_file()) && !set.contains(&rel_str) {
+        if entry.file_type().is_some_and(|t| t.is_file()) && !set.contains(&rel_str) {
             return false;
         }
     }

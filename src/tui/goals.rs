@@ -43,7 +43,24 @@ pub(super) struct GoalRow {
 }
 
 /// Flatten goals into display rows according to the expand set.
+/// Uses two passes so all progress bars align at the same column.
 pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<GoalRow> {
+    if goals.is_empty() {
+        return Vec::new();
+    }
+
+    // Pass 1: compute max prefix width (marker + title + badge + padding).
+    let max_prefix = goals
+        .iter()
+        .map(|goal| {
+            // marker (1) + space (1) + title + "  " + badge + "  "
+            2 + goal.title.len() + 2 + goal.badge.len() + 2
+        })
+        .max()
+        .unwrap_or(40);
+
+    // Pass 2: render each header, padding the prefix so the right chunk
+    // (progress bar + percentage) starts at a fixed column.
     let mut rows = Vec::new();
     for (gi, goal) in goals.iter().enumerate() {
         let key = format!("g{gi}");
@@ -54,15 +71,12 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
         };
         let pct = (goal.progress() * 100.0).round() as u32;
         let completed = goal.status() == Status::Completed;
+        let prefix = format!("{marker} {}  {}  ", goal.title, goal.badge);
+        let right = format!("[{}]  {}%", progress_bar(pct), pct);
+        let pad = max_prefix.saturating_sub(prefix.len()) + 2;
         rows.push(GoalRow {
             kind: GoalRowKind::Header { key: key.clone() },
-            text: format!(
-                "{marker} {}  {}  [{}] {}%",
-                goal.title,
-                goal.badge,
-                progress_bar(pct),
-                pct
-            ),
+            text: format!("{prefix}{:pad$}{right}", ""),
             style: if completed {
                 Style::default().add_modifier(Modifier::DIM | Modifier::CROSSED_OUT)
             } else {
@@ -179,7 +193,7 @@ fn push_item(
         // Milestone: foldable.  Append direct-children ratio.
         let checked_children = item.children.iter().filter(|c| c.checked).count();
         let total_children = item.children.len();
-        let ratio = format!("  {checked_children}/{total_children}");
+        let ratio = format!("    {checked_children}/{total_children}");
         let marker = if expanded.contains(key) { '▼' } else { '▸' };
         rows.push(GoalRow {
             kind: GoalRowKind::Milestone {
