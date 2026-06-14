@@ -72,7 +72,14 @@ impl SortMode {
 
 /// Run the TUI over a scan result. Restores the terminal on exit or panic.
 pub fn run(result: ScanResult, root: PathBuf, headers: HashMap<String, Vec<String>>) -> Result<()> {
-    let mut app = App::new(result.goals, result.inline_tasks, root, headers);
+    let mut app = App::new(
+        result.goals,
+        result.inline_tasks,
+        root,
+        headers,
+        result.file_contents,
+        2, // context_lines (matches display default)
+    );
 
     let mut terminal = setup_terminal()?;
     // If the main loop errors, still restore the terminal before returning.
@@ -351,6 +358,8 @@ struct App {
     inline_displayed: Vec<InlineTask>,
     root: PathBuf,
     headers: HashMap<String, Vec<String>>,
+    file_contents: HashMap<PathBuf, String>,
+    context_lines: u32,
     sort_mode: SortMode,
     view: View,
     mode: Mode,
@@ -387,6 +396,8 @@ impl App {
         inline_tasks: Vec<InlineTask>,
         root: PathBuf,
         headers: HashMap<String, Vec<String>>,
+        file_contents: HashMap<PathBuf, String>,
+        context_lines: u32,
     ) -> Self {
         let goal_expanded = HashSet::new();
         let goal_rows = flatten_goals(&goals, &goal_expanded, false);
@@ -394,7 +405,14 @@ impl App {
         let inline_displayed = inline_tasks.clone();
         let inline_root = build_tree(&inline_displayed);
         let expanded_inline = auto_expand_keys(&inline_root, &inline_displayed);
-        let inline_rows = flatten_inline(&inline_root, &inline_displayed, &expanded_inline, false);
+        let inline_rows = flatten_inline(
+            &inline_root,
+            &inline_displayed,
+            &expanded_inline,
+            false,
+            &file_contents,
+            context_lines,
+        );
 
         Self {
             goals,
@@ -402,6 +420,8 @@ impl App {
             inline_displayed,
             root,
             headers,
+            file_contents,
+            context_lines,
             sort_mode: SortMode::Path,
             view: View::Goals,
             mode: Mode::Normal,
@@ -582,6 +602,8 @@ impl App {
             &self.inline_displayed,
             &self.expanded_inline,
             self.show_blame,
+            &self.file_contents,
+            self.context_lines,
         );
         if !self.inline_rows.is_empty() {
             self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
@@ -600,6 +622,8 @@ impl App {
             &self.inline_displayed,
             &self.expanded_inline,
             self.show_blame,
+            &self.file_contents,
+            self.context_lines,
         );
         if !self.inline_rows.is_empty() {
             self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
@@ -622,6 +646,8 @@ impl App {
             &self.inline_displayed,
             &self.expanded_inline,
             self.show_blame,
+            &self.file_contents,
+            self.context_lines,
         );
     }
 
@@ -643,10 +669,22 @@ impl App {
             }
             View::Inline => {
                 let len = self.inline_rows.len();
-                if len != 0 {
-                    let next = (self.inline_selected as i32 + delta).clamp(0, (len - 1) as i32);
-                    self.inline_selected = next as usize;
+                if len == 0 {
+                    return;
                 }
+                let mut next = (self.inline_selected as i32 + delta).clamp(0, (len - 1) as i32);
+                // Skip Context (display-only) rows.
+                while let Some(row) = self.inline_rows.get(next as usize) {
+                    if matches!(row.kind, inline_view::InlineRowKind::Context) {
+                        next += delta;
+                        if next < 0 || next as usize >= len {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                self.inline_selected = next.clamp(0, (len - 1) as i32) as usize;
             }
         }
     }
@@ -823,6 +861,7 @@ impl App {
                         inline_view::InlineRowKind::Task { parent_key, line } => {
                             Some(format!("{parent_key}::{line}"))
                         }
+                        inline_view::InlineRowKind::Context => None,
                     });
                 let Some(path) = path else {
                     return;
@@ -995,6 +1034,19 @@ impl App {
     /// Enter: toggle the selected node (fold ↔ unfold). On a leaf, toggles
     /// the parent and moves the cursor onto it.
     fn toggle_selected(&mut self) {
+        // Inline tasks: Enter toggles context expansion rather than fold.
+        if self.view == View::Inline {
+            if let Some(context_key) = self.selected_task_key() {
+                if self.expanded_inline.contains(&context_key) {
+                    self.expanded_inline.remove(&context_key);
+                } else {
+                    self.expanded_inline.insert(context_key);
+                }
+                self.rebuild_active();
+                return;
+            }
+        }
+
         let Some(key) = self.current_key() else {
             return;
         };
@@ -1007,6 +1059,7 @@ impl App {
                 }
             }
             View::Inline => {
+                // Dir/File fold (tasks are handled above).
                 if self.expanded_inline.contains(&key) {
                     self.expanded_inline.remove(&key);
                 } else {
@@ -1015,6 +1068,19 @@ impl App {
             }
         };
         self.rebuild_active();
+    }
+
+    /// The context-expansion key for the selected inline task, if any.
+    /// `None` for Dir/File/Context rows.
+    fn selected_task_key(&self) -> Option<String> {
+        self.inline_rows
+            .get(self.inline_selected)
+            .and_then(|r| match &r.kind {
+                inline_view::InlineRowKind::Task { parent_key, line } => {
+                    Some(format!("{parent_key}::{line}"))
+                }
+                _ => None,
+            })
     }
 
     /// The key of the selected goals-view row. For a leaf task, returns its
@@ -1044,11 +1110,12 @@ impl App {
     fn selected_inline_key(&self) -> Option<String> {
         self.inline_rows
             .get(self.inline_selected)
-            .map(|row| match &row.kind {
+            .and_then(|row| match &row.kind {
                 inline_view::InlineRowKind::Dir(k) | inline_view::InlineRowKind::File(k) => {
-                    k.clone()
+                    Some(k.clone())
                 }
-                inline_view::InlineRowKind::Task { parent_key, .. } => parent_key.clone(),
+                inline_view::InlineRowKind::Task { parent_key, .. } => Some(parent_key.clone()),
+                inline_view::InlineRowKind::Context => None,
             })
     }
 }
@@ -1070,6 +1137,7 @@ fn inline_row_id(row: &InlineRow) -> String {
         inline_view::InlineRowKind::Task { parent_key, line } => {
             format!("{parent_key}::{line}")
         }
+        inline_view::InlineRowKind::Context => String::new(),
     }
 }
 
@@ -1317,7 +1385,14 @@ mod tests {
 
     #[test]
     fn expand_all_keeps_cursor_on_later_goal() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
         select_goal(&mut app, "g1"); // cursor on goalB header
         app.expand_all(); // X: expands everything above; index would drift
         assert_eq!(selected_goal_id(&app), "g1");
@@ -1325,7 +1400,14 @@ mod tests {
 
     #[test]
     fn collapse_all_moves_cursor_to_ancestor() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
         app.goal_expanded.insert("g0".into());
         app.goal_expanded.insert("g0/0".into());
         select_goal(&mut app, "g0/0/0"); // cursor on leaf "a"
@@ -1335,7 +1417,14 @@ mod tests {
 
     #[test]
     fn collapse_leaf_moves_cursor_to_parent() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
         app.goal_expanded.insert("g0".into());
         app.goal_expanded.insert("g0/0".into());
         select_goal(&mut app, "g0/0/0"); // leaf "a"
@@ -1345,7 +1434,14 @@ mod tests {
 
     #[test]
     fn expand_node_keeps_cursor() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
         select_goal(&mut app, "g0"); // goalA header, collapsed
         app.expand_selected(); // l
         assert_eq!(selected_goal_id(&app), "g0");
@@ -1353,7 +1449,14 @@ mod tests {
 
     #[test]
     fn toggle_leaf_moves_cursor_to_parent() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
         app.goal_expanded.insert("g0".into());
         app.goal_expanded.insert("g0/0".into());
         select_goal(&mut app, "g0/0/0"); // leaf "a"
@@ -1363,7 +1466,14 @@ mod tests {
 
     #[test]
     fn collapse_completed_reanchors_to_ancestor() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
         app.goal_expanded.insert("g1".into()); // expand completed goalB
         select_goal(&mut app, "g1/0"); // leaf "d" under goalB
         app.collapse_completed(); // C: collapses goalB
@@ -1389,7 +1499,14 @@ mod tests {
     #[test]
     fn expand_all_inline_keeps_cursor() {
         let tasks = vec![itask("a/x.rs", 1), itask("b/y.rs", 2)];
-        let mut app = App::new(vec![], tasks, PathBuf::from("."), HashMap::new());
+        let mut app = App::new(
+            vec![],
+            tasks,
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
         app.view = View::Inline;
         app.rebuild_active();
         // cursor on "b/" (index would drift as "a/" expands above it)
@@ -1404,7 +1521,14 @@ mod tests {
 
     #[test]
     fn toggling_blame_rebuilds_rows() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
         assert!(!app.show_blame);
         app.toggle_blame();
         assert!(app.show_blame);

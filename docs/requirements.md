@@ -284,14 +284,11 @@ description, and optional priority badge.
 ### Inline Expansion
 
 Pressing `Enter` on a specific inline task **expands it in place** within
-the tree, showing 2 context lines (configurable via `context_lines`) from
-the source file and optional git blame below it. Press `Enter` again to
-collapse. No separate panel or view switch — the user keeps their position
-in the tree.
-
-> **Not yet implemented.** Inline expansion (context lines from the source
-> file) is deferred. (`Enter` currently toggles fold state on the parent
-> node — see Behaviors above.)
+the tree, showing `context_lines` (default: 2) lines above and below from
+the source file. Press `Enter` again to collapse. Context rows are
+display-only (non‑selectable, dimmed) and are skipped by the cursor.
+No separate panel or view switch — the user keeps their position in the
+tree.
 
 ### Filtering
 

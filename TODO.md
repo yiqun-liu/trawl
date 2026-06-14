@@ -110,10 +110,10 @@ For syntax specification, see `docs/syntax.md`.
   - [ ] Implement file path sort (alphabetical, default)
   - [ ] Implement keyword sort (group all FIXMEs, then TODOs, etc.)
   - [ ] Add sort mode cycling (`s` key)
-- [ ] Inline Expansion
-  - [ ] Read context lines from source file around task line number
-  - [ ] Render expanded view inline within the tree
-  - [ ] Preserve cursor position during expand/collapse
+- [x] Inline Expansion
+  - [x] Read context lines from source file around task line number
+  - [x] Render expanded view inline within the tree
+  - [x] Preserve cursor position during expand/collapse
 - [x] Color Coding
   - [x] Define priority color scheme (red/yellow/gray)
   - [x] Define keyword color scheme (cyan for TODO, red for FIXME, etc.)

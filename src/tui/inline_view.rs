@@ -5,7 +5,8 @@
 //! high-priority task start expanded. The tree build and flatten are pure
 //! functions so they can be unit-tested without a terminal.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 
 use ratatui::{
     layout::Rect,
@@ -40,6 +41,9 @@ pub(super) enum InlineRowKind {
         parent_key: String,
         line: usize,
     },
+    /// Source-context lines shown under an expanded task (display-only,
+    /// non‑selectable).
+    Context,
 }
 
 pub(super) struct InlineRow {
@@ -85,12 +89,25 @@ pub(super) fn flatten_inline(
     tasks: &[InlineTask],
     expanded: &HashSet<String>,
     show_blame: bool,
+    file_contents: &HashMap<PathBuf, String>,
+    context_lines: u32,
 ) -> Vec<InlineRow> {
     let mut rows = Vec::new();
-    flatten_dir(root, "", 0, tasks, expanded, show_blame, &mut rows);
+    flatten_dir(
+        root,
+        "",
+        0,
+        tasks,
+        expanded,
+        show_blame,
+        file_contents,
+        context_lines,
+        &mut rows,
+    );
     rows
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flatten_dir(
     node: &TreeNode,
     prefix: &str,
@@ -98,6 +115,8 @@ fn flatten_dir(
     tasks: &[InlineTask],
     expanded: &HashSet<String>,
     show_blame: bool,
+    file_contents: &HashMap<PathBuf, String>,
+    context_lines: u32,
     rows: &mut Vec<InlineRow>,
 ) {
     let indent = "  ".repeat(depth);
@@ -116,7 +135,17 @@ fn flatten_dir(
             style: Style::default(),
         });
         if expanded.contains(&key) {
-            flatten_dir(dir, &key, depth + 1, tasks, expanded, show_blame, rows);
+            flatten_dir(
+                dir,
+                &key,
+                depth + 1,
+                tasks,
+                expanded,
+                show_blame,
+                file_contents,
+                context_lines,
+                rows,
+            );
         }
     }
 
@@ -172,6 +201,31 @@ fn flatten_dir(
                     let last = rows.last_mut().unwrap();
                     last.text.push_str("  [stale]");
                     last.style = last.style.add_modifier(Modifier::DIM);
+                }
+
+                // Inline expansion: show context lines when the task is
+                // expanded.
+                let task_key = format!("{key}::{}", task.span.line);
+                if expanded.contains(&task_key) && context_lines > 0 {
+                    if let Some(content) = file_contents.get(&task.span.path) {
+                        let file_lines: Vec<&str> = content.split('\n').collect();
+                        let ctx = context_lines as i32;
+                        let line_idx = task.span.line.saturating_sub(1);
+                        let start = (line_idx as i32 - ctx).max(0) as usize;
+                        let end = (line_idx + ctx as usize + 1).min(file_lines.len());
+                        for (offset, content) in file_lines[start..end].iter().enumerate() {
+                            let actual_idx = start + offset;
+                            if actual_idx == line_idx {
+                                continue;
+                            }
+                            let label = format!("▎L{}", actual_idx + 1);
+                            rows.push(InlineRow {
+                                kind: InlineRowKind::Context,
+                                text: format!("{task_indent}  {label}  {}", content),
+                                style: Style::default().add_modifier(Modifier::DIM),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -343,7 +397,7 @@ mod tests {
     fn collapsed_shows_only_top_level() {
         let tasks = vec![task("src/a.rs", 1, "TODO", None)];
         let root = build_tree(&tasks);
-        let rows = flatten_inline(&root, &tasks, &HashSet::new(), false);
+        let rows = flatten_inline(&root, &tasks, &HashSet::new(), false, &HashMap::new(), 0);
         assert_eq!(rows.len(), 1); // just "src/"
         assert!(rows[0].text.contains("src/"));
         assert!(rows[0].text.contains("[1]"));
@@ -359,7 +413,7 @@ mod tests {
         let mut expanded = HashSet::new();
         expanded.insert("src".to_string());
         expanded.insert("src/a.rs".to_string());
-        let rows = flatten_inline(&root, &tasks, &expanded, false);
+        let rows = flatten_inline(&root, &tasks, &expanded, false, &HashMap::new(), 0);
         // src/ (expanded), a.rs (expanded), task@1, task@9
         assert_eq!(rows.len(), 4);
         assert!(rows[2].text.contains("L1"));
@@ -412,9 +466,9 @@ mod tests {
         let root = build_tree(&tasks);
         let mut expanded = HashSet::new();
         expanded.insert("a.rs".to_string());
-        let rows = flatten_inline(&root, &tasks, &expanded, false);
+        let rows = flatten_inline(&root, &tasks, &expanded, false, &HashMap::new(), 0);
         assert!(!rows[1].text.contains("alice"));
-        let rows = flatten_inline(&root, &tasks, &expanded, true);
+        let rows = flatten_inline(&root, &tasks, &expanded, true, &HashMap::new(), 0);
         assert!(rows[1].text.contains("alice"));
     }
 }

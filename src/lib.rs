@@ -12,7 +12,8 @@ pub mod parser;
 pub mod scanner;
 pub mod tui;
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
@@ -25,6 +26,9 @@ pub use scanner::{FileContents, ScanOptions};
 pub struct ScanResult {
     pub goals: Vec<Goal>,
     pub inline_tasks: Vec<InlineTask>,
+    /// Full text contents of every scanned file, keyed by the relative
+    /// path. Used by inline expansion (context lines) and editor integration.
+    pub file_contents: HashMap<PathBuf, String>,
 }
 
 /// Walk the repository, then parse every file for goals and inline tasks.
@@ -47,9 +51,15 @@ pub fn scan(options: &ScanOptions, ctx: &ParseContext) -> Result<ScanResult> {
         let _ = blame::enrich_tasks(root, &mut inline_tasks);
         let _ = blame::enrich_goals(root, &mut goals);
     }
+    let mut file_contents = HashMap::new();
+    for fc in &files {
+        let rel: PathBuf = fc.path.strip_prefix(root).unwrap_or(&fc.path).to_path_buf();
+        file_contents.insert(rel, fc.content.clone());
+    }
     Ok(ScanResult {
         goals,
         inline_tasks,
+        file_contents,
     })
 }
 
