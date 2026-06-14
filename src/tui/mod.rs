@@ -502,7 +502,7 @@ impl App {
             }
         }
         let mut ds: Vec<(&String, &usize)> = dirs.iter().collect();
-        ds.sort_by(|a, b| b.1.cmp(a.1));
+        ds.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
         lines.push(Line::from(""));
         lines.push(Line::from("Top directories"));
         for (dir, count) in ds.iter().take(5) {

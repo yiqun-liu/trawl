@@ -89,7 +89,7 @@ impl Default for Config {
             headers: default_headers(),
             display: DisplayConfig {
                 default_sort: "path".into(),
-                show_git_blame: false,
+                show_git_blame: true,
                 context_lines: 2,
                 auto_expand_priority: "high".into(),
                 stale_threshold_days: 365,
