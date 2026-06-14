@@ -4,6 +4,7 @@
 //! [`GoalItem`]s. Both checkbox lists and tables are recognized; a table row
 //! becomes a leaf `GoalItem` whose checked state comes from the done-heuristic.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -151,7 +152,7 @@ fn assemble(idx: usize, arena: &[Node], children_of: &[Vec<usize>]) -> GoalItem 
 /// of lines consumed and the flat list of leaf items.
 fn parse_table(block: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> (usize, Vec<GoalItem>) {
     let header = parse_row(block[0].1);
-    let colmap = map_columns(&header, ctx);
+    let colmap = map_columns(&header, ctx.headers());
 
     // Count data rows (contiguous pipe-lines after header + separator).
     let mut consumed = 2; // header + separator
@@ -189,14 +190,14 @@ fn parse_table(block: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> (usiz
 }
 
 /// Map each header cell to a known field name, or `None` for a custom column.
-fn map_columns(header: &[String], ctx: &ParseContext) -> Vec<Option<String>> {
+fn map_columns(header: &[String], headers: &HashMap<String, Vec<String>>) -> Vec<Option<String>> {
     let order = ["task", "state", "owner", "priority", "tag", "due"];
     header
         .iter()
         .map(|cell| {
             let lc = cell.to_lowercase();
             for field in order {
-                if let Some(keywords) = ctx.headers().get(field) {
+                if let Some(keywords) = headers.get(field) {
                     if keywords.iter().any(|k| lc.contains(&k.to_lowercase())) {
                         return Some(field.to_string());
                     }
@@ -260,7 +261,7 @@ fn build_row(
 }
 
 /// Done heuristic: a cell counts as done unless it is empty or contains TODO.
-fn done_heuristic(cell: &str) -> bool {
+pub(crate) fn done_heuristic(cell: &str) -> bool {
     let trimmed = cell.trim();
     !(trimmed.is_empty() || trimmed.to_lowercase().contains("todo"))
 }
@@ -292,6 +293,49 @@ fn parse_row(line: &str) -> Vec<String> {
         cells.pop();
     }
     cells
+}
+
+/// For a table data row at 1-based `lineno` in `lines`, locate the state
+/// column (by scanning up to the header) and return `(state_col_index,
+/// current_value)`. `None` if the line is not in a table or has no state
+/// column.
+pub(crate) fn table_state_cell(
+    lines: &[&str],
+    lineno: usize,
+    headers: &HashMap<String, Vec<String>>,
+) -> Option<(usize, String)> {
+    let row_idx = lineno.checked_sub(1)?;
+    let row_line = lines.get(row_idx)?;
+    if !is_table_line(row_line) {
+        return None;
+    }
+    // Scan upward for the separator, then the header just above it.
+    let sep_idx = (0..row_idx).rev().find(|&i| is_table_sep(lines[i]))?;
+    if sep_idx == 0 {
+        return None;
+    }
+    let header = parse_row(lines[sep_idx - 1]);
+    let colmap = map_columns(&header, headers);
+    let state_col = colmap.iter().position(|c| c.as_deref() == Some("state"))?;
+    let cells = parse_row(row_line);
+    let value = cells.get(state_col).cloned().unwrap_or_default();
+    Some((state_col, value))
+}
+
+/// Rebuild a table row with the cell at `state_col` replaced by `new_value`,
+/// preserving the outer pipes and other cells (padding is normalized).
+pub(crate) fn rewrite_state_cell(row_line: &str, state_col: usize, new_value: &str) -> String {
+    let had_outer = row_line.trim_start().starts_with('|');
+    let mut cells = parse_row(row_line);
+    if state_col < cells.len() {
+        cells[state_col] = new_value.trim().to_string();
+    }
+    let body = cells.join(" | ");
+    if had_outer {
+        format!("| {body} |")
+    } else {
+        body
+    }
 }
 
 fn heading_re() -> &'static Regex {

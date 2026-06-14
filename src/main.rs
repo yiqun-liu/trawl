@@ -50,7 +50,7 @@ fn main() -> Result<()> {
     if cli.no_tui {
         print_summary(&result);
     } else {
-        trawl::tui::run(result, cli.path.clone())?;
+        trawl::tui::run(result, cli.path.clone(), config.headers.clone())?;
     }
     Ok(())
 }

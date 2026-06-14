@@ -5,7 +5,7 @@
 //! the user's terminal. Pure display logic (row flattening) lives in
 //! `goals.rs` so it can be unit-tested without a terminal.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
@@ -49,11 +49,12 @@ enum View {
 enum Mode {
     Normal,
     FilterInput,
+    CellEdit,
 }
 
 /// Run the TUI over a scan result. Restores the terminal on exit or panic.
-pub fn run(result: ScanResult, root: PathBuf) -> Result<()> {
-    let mut app = App::new(result.goals, result.inline_tasks, root);
+pub fn run(result: ScanResult, root: PathBuf, headers: HashMap<String, Vec<String>>) -> Result<()> {
+    let mut app = App::new(result.goals, result.inline_tasks, root, headers);
 
     let mut terminal = setup_terminal()?;
     // If the main loop errors, still restore the terminal before returning.
@@ -130,6 +131,23 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         return;
     }
 
+    if app.mode == Mode::CellEdit {
+        match key.code {
+            KeyCode::Enter => app.apply_cell_edit(),
+            KeyCode::Esc => {
+                app.cell_edit = None;
+                app.cell_input.clear();
+                app.mode = Mode::Normal;
+            }
+            KeyCode::Backspace => {
+                app.cell_input.pop();
+            }
+            KeyCode::Char(c) => app.cell_input.push(c),
+            _ => {}
+        }
+        return;
+    }
+
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') => app.quit = true,
         KeyCode::Tab => app.toggle_view(),
@@ -161,7 +179,9 @@ fn draw(f: &mut Frame, app: &App) {
         View::Inline => inline_view::draw(f, app, main),
     }
 
-    let footer_text = if app.mode == Mode::FilterInput {
+    let footer_text = if app.mode == Mode::CellEdit {
+        format!("edit state column > {}", app.cell_input)
+    } else if app.mode == Mode::FilterInput {
         format!("filter> {}", app.filter_input)
     } else {
         match app.view {
@@ -183,6 +203,9 @@ fn draw(f: &mut Frame, app: &App) {
     if app.show_help {
         draw_help(f, app.view);
     }
+    if app.mode == Mode::CellEdit {
+        draw_cell_edit(f, &app.cell_input);
+    }
 }
 
 /// Render the modal help overlay on top of the current view.
@@ -194,6 +217,19 @@ fn draw_help(f: &mut Frame, view: View) {
         .title("Keybindings  (press ? or Esc to close)");
     f.render_widget(
         ratatui::widgets::Paragraph::new(help_text(view)).block(block),
+        area,
+    );
+}
+
+/// Render the cell-edit popup, pre-filled with the current state-cell value.
+fn draw_cell_edit(f: &mut Frame, input: &str) {
+    let area = centered_rect(50, 16, f.area());
+    f.render_widget(Clear, area);
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .title("Edit state  (Enter: save  Esc: cancel)");
+    f.render_widget(
+        ratatui::widgets::Paragraph::new(Line::from(format!("> {}", input))).block(block),
         area,
     );
 }
@@ -255,11 +291,14 @@ struct App {
     inline_tasks: Vec<InlineTask>,
     inline_displayed: Vec<InlineTask>,
     root: PathBuf,
+    headers: HashMap<String, Vec<String>>,
     view: View,
     mode: Mode,
     filter: Option<Filter>,
     filter_query: String,
     filter_input: String,
+    cell_input: String,
+    cell_edit: Option<CellTarget>,
     goal_rows: Vec<GoalRow>,
     goal_selected: usize,
     goal_expanded: HashSet<String>,
@@ -271,8 +310,21 @@ struct App {
     show_help: bool,
 }
 
+/// In-flight table-cell edit: which goal item, which source line, which column.
+struct CellTarget {
+    gi: usize,
+    path: Vec<usize>,
+    line: usize,
+    state_col: usize,
+}
+
 impl App {
-    fn new(goals: Vec<Goal>, inline_tasks: Vec<InlineTask>, root: PathBuf) -> Self {
+    fn new(
+        goals: Vec<Goal>,
+        inline_tasks: Vec<InlineTask>,
+        root: PathBuf,
+        headers: HashMap<String, Vec<String>>,
+    ) -> Self {
         let goal_expanded = HashSet::new();
         let goal_rows = flatten_goals(&goals, &goal_expanded);
 
@@ -286,11 +338,14 @@ impl App {
             inline_tasks,
             inline_displayed,
             root,
+            headers,
             view: View::Goals,
             mode: Mode::Normal,
             filter: None,
             filter_query: String::new(),
             filter_input: String::new(),
+            cell_input: String::new(),
+            cell_edit: None,
             goal_rows,
             goal_selected: 0,
             goal_expanded,
@@ -421,9 +476,10 @@ impl App {
         }
     }
 
-    /// `Space` (goals view): flip the selected item's checkbox `[x]`/`[ ]` in
-    /// the source file and in memory. Goal headers and non-checkbox lines are
-    /// left untouched.
+    /// `Space` (goals view): toggle the selected item's completion in the
+    /// source file and in memory. A checkbox item flips `[x]`/`[ ]` in place;
+    /// a table row opens a cell-edit popup on its state cell. Goal headers and
+    /// non-toggleable lines are left untouched.
     fn toggle_checkbox(&mut self) {
         if self.view != View::Goals {
             return;
@@ -443,24 +499,82 @@ impl App {
             log::warn!("toggle: cannot read {}", abs.display());
             return;
         };
-        let mut lines: Vec<String> = content.split('\n').map(String::from).collect();
+        let lines: Vec<&str> = content.split('\n').collect();
         let idx = line.saturating_sub(1);
-        if idx >= lines.len() {
+        let Some(row_line) = lines.get(idx) else {
             log::warn!("toggle: line {line} out of range in {}", abs.display());
             return;
-        }
-        let Some(new_line) = goals::flip_checkbox(&lines[idx]) else {
-            log::debug!("toggle: not a checkbox line at {}:{}", abs.display(), line);
-            return;
         };
-        lines[idx] = new_line;
-        if fs::write(&abs, lines.join("\n")).is_err() {
-            log::warn!("toggle: cannot write {}", abs.display());
+
+        // Checkbox item: flip in place.
+        if let Some(new_line) = goals::flip_checkbox(row_line) {
+            let mut all = lines.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+            all[idx] = new_line;
+            if fs::write(&abs, all.join("\n")).is_err() {
+                log::warn!("toggle: cannot write {}", abs.display());
+                return;
+            }
+            if let Some(item) = goal_item_mut(&mut self.goals, gi, &path) {
+                item.checked = !item.checked;
+            }
+            self.rebuild_active();
             return;
         }
 
-        if let Some(item) = goal_item_mut(&mut self.goals, gi, &path) {
-            item.checked = !item.checked;
+        // Table row: open the state-cell edit popup.
+        if let Some((state_col, value)) =
+            crate::parser::goal::table_state_cell(&lines, line, &self.headers)
+        {
+            self.cell_input = value;
+            self.cell_edit = Some(CellTarget {
+                gi,
+                path,
+                line,
+                state_col,
+            });
+            self.mode = Mode::CellEdit;
+        } else {
+            log::debug!(
+                "toggle: not a checkbox or table row at {}:{}",
+                abs.display(),
+                line
+            );
+        }
+    }
+
+    /// Enter in cell-edit mode: write the edited value into the table cell and
+    /// recompute the item's checked state.
+    fn apply_cell_edit(&mut self) {
+        let Some(target) = self.cell_edit.take() else {
+            self.mode = Mode::Normal;
+            return;
+        };
+        self.mode = Mode::Normal;
+        let new_value = std::mem::take(&mut self.cell_input);
+
+        let Some((rel, _)) = goal_item_span(&self.goals, target.gi, &target.path) else {
+            return;
+        };
+        let line = target.line;
+        let abs = self.root.join(&rel);
+        let Ok(content) = fs::read_to_string(&abs) else {
+            log::warn!("cell edit: cannot read {}", abs.display());
+            return;
+        };
+        let mut all: Vec<String> = content.split('\n').map(String::from).collect();
+        let idx = line.saturating_sub(1);
+        if idx >= all.len() {
+            log::warn!("cell edit: line {line} out of range");
+            return;
+        }
+        all[idx] = crate::parser::goal::rewrite_state_cell(&all[idx], target.state_col, &new_value);
+        if fs::write(&abs, all.join("\n")).is_err() {
+            log::warn!("cell edit: cannot write {}", abs.display());
+            return;
+        }
+
+        if let Some(item) = goal_item_mut(&mut self.goals, target.gi, &target.path) {
+            item.checked = crate::parser::goal::done_heuristic(&new_value);
         }
         self.rebuild_active();
     }
@@ -896,7 +1010,7 @@ mod tests {
 
     #[test]
     fn expand_all_keeps_cursor_on_later_goal() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
         select_goal(&mut app, "g1"); // cursor on goalB header
         app.expand_all(); // X: expands everything above; index would drift
         assert_eq!(selected_goal_id(&app), "g1");
@@ -904,7 +1018,7 @@ mod tests {
 
     #[test]
     fn collapse_all_moves_cursor_to_ancestor() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
         app.goal_expanded.insert("g0".into());
         app.goal_expanded.insert("g0/0".into());
         select_goal(&mut app, "g0/0/0"); // cursor on leaf "a"
@@ -914,7 +1028,7 @@ mod tests {
 
     #[test]
     fn collapse_leaf_moves_cursor_to_parent() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
         app.goal_expanded.insert("g0".into());
         app.goal_expanded.insert("g0/0".into());
         select_goal(&mut app, "g0/0/0"); // leaf "a"
@@ -924,7 +1038,7 @@ mod tests {
 
     #[test]
     fn expand_node_keeps_cursor() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
         select_goal(&mut app, "g0"); // goalA header, collapsed
         app.expand_selected(); // l
         assert_eq!(selected_goal_id(&app), "g0");
@@ -932,7 +1046,7 @@ mod tests {
 
     #[test]
     fn toggle_leaf_moves_cursor_to_parent() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
         app.goal_expanded.insert("g0".into());
         app.goal_expanded.insert("g0/0".into());
         select_goal(&mut app, "g0/0/0"); // leaf "a"
@@ -942,7 +1056,7 @@ mod tests {
 
     #[test]
     fn collapse_completed_reanchors_to_ancestor() {
-        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
         app.goal_expanded.insert("g1".into()); // expand completed goalB
         select_goal(&mut app, "g1/0"); // leaf "d" under goalB
         app.collapse_completed(); // C: collapses goalB
@@ -965,7 +1079,7 @@ mod tests {
     #[test]
     fn expand_all_inline_keeps_cursor() {
         let tasks = vec![itask("a/x.rs", 1), itask("b/y.rs", 2)];
-        let mut app = App::new(vec![], tasks, PathBuf::from("."));
+        let mut app = App::new(vec![], tasks, PathBuf::from("."), HashMap::new());
         app.view = View::Inline;
         app.rebuild_active();
         // cursor on "b/" (index would drift as "a/" expands above it)
