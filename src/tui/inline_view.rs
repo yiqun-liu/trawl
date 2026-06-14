@@ -198,6 +198,21 @@ fn priority_style(priority: Option<&Priority>) -> Style {
     }
 }
 
+/// Count tasks by triage level: `(high, med, low, untagged)`. Anything that is
+/// not high/med/low (including `None` and custom `Other` values) is untagged.
+fn priority_breakdown(tasks: &[InlineTask]) -> (usize, usize, usize, usize) {
+    let (mut high, mut med, mut low, mut untagged) = (0, 0, 0, 0);
+    for t in tasks {
+        match &t.metadata.priority {
+            Some(Priority::High) => high += 1,
+            Some(Priority::Med) => med += 1,
+            Some(Priority::Low) => low += 1,
+            _ => untagged += 1,
+        }
+    }
+    (high, med, low, untagged)
+}
+
 /// Render the inline tasks view. Stateful so the viewport follows the cursor.
 pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
     let items: Vec<ListItem> = app
@@ -206,15 +221,14 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
         .map(|row| ListItem::new(Line::from(row.text.clone()).style(row.style)))
         .collect();
 
-    let title = if app.filter.is_some() {
-        format!(
-            "Inline Tasks  ({}/{})",
-            app.inline_displayed.len(),
-            app.inline_tasks.len()
-        )
+    let (high, med, low, untagged) = priority_breakdown(&app.inline_displayed);
+    let count = if app.filter.is_some() {
+        format!("{}/{}", app.inline_displayed.len(), app.inline_tasks.len())
     } else {
-        format!("Inline Tasks  ({})", app.inline_displayed.len())
+        app.inline_displayed.len().to_string()
     };
+    let title =
+        format!("Inline Tasks  ({count})  high:{high} med:{med} low:{low} untagged:{untagged}");
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
