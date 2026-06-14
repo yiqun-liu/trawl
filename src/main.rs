@@ -1,6 +1,7 @@
 //! trawl binary entry point.
 
-use std::path::PathBuf;
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use clap::Parser;
@@ -29,11 +30,15 @@ struct Cli {
     /// Skip the TUI and print a summary instead (for scripts / no-TTY contexts).
     #[arg(long)]
     no_tui: bool,
+
+    /// Write logs to <PATH> instead of the platform-conventional location.
+    #[arg(long, value_name = "PATH")]
+    log_file: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    init_logging(cli.verbose);
+    init_logging(cli.verbose, cli.log_file);
 
     let config = Config::load(&cli.path)?;
     log::debug!("loaded config: {} keywords", config.scan.keywords.len());
@@ -114,10 +119,58 @@ fn priority_breakdown(tasks: &[InlineTask]) -> (usize, usize, usize, usize, usiz
     (high, med, low, other, untagged)
 }
 
-/// Initialize the logger. `verbose` selects `debug`, otherwise `warn`.
-fn init_logging(verbose: bool) {
+/// Initialize the logger. `verbose` selects `debug`, otherwise `warn`. Logs
+/// go to `log_file` if given, else the platform-conventional location; if the
+/// file cannot be opened, fall back to stderr.
+fn init_logging(verbose: bool, log_file: Option<PathBuf>) {
     let level = if verbose { "debug" } else { "warn" };
+    let path = log_file.unwrap_or_else(conventional_log_path);
+    let target = match open_log(&path) {
+        Some(file) => env_logger::Target::Pipe(Box::new(file)),
+        None => env_logger::Target::Stderr,
+    };
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(level))
+        .target(target)
         .format_target(false)
         .try_init();
+}
+
+/// Open (creating parents and the file) the log file for appending.
+fn open_log(path: &Path) -> Option<File> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    OpenOptions::new().create(true).append(true).open(path).ok()
+}
+
+/// Platform-conventional default log path (never the terminal, so the TUI is
+/// never corrupted). Linux: XDG state dir; macOS: ~/Library/Logs; Windows:
+/// %LOCALAPPDATA%.
+fn conventional_log_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(base)
+            .join("trawl")
+            .join("logs")
+            .join("trawl.log")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join("Library/Logs/trawl/trawl.log")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(xdg) = std::env::var("XDG_STATE_HOME") {
+            PathBuf::from(xdg).join("trawl/trawl.log")
+        } else {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join(".local/state/trawl/trawl.log")
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        PathBuf::from("trawl.log")
+    }
 }
