@@ -1,22 +1,278 @@
-//! Inline tasks view placeholder.
+//! Inline tasks view: a foldable directory tree.
 //!
-//! The full foldable directory tree arrives in the next slice; for now this
-//! renders a summary so Tab navigation between views works end to end.
+//! Tasks are grouped by path into a directory tree, then flattened into
+//! display rows according to the expand state. Directories containing any
+//! high-priority task start expanded. The tree build and flatten are pure
+//! functions so they can be unit-tested without a terminal.
+
+use std::collections::{BTreeMap, HashSet};
 
 use ratatui::{
     layout::Rect,
-    text::Text,
-    widgets::{Block, Borders, Paragraph},
+    style::{Modifier, Style},
+    text::Line,
+    widgets::{Block, Borders, List, ListItem},
     Frame,
 };
 
-/// Render the inline tasks view (summary only in this slice).
+use crate::model::{InlineTask, Priority};
+
+/// A directory in the tree. Self-referential but fixed-size (BTreeMap is
+/// heap-allocated), so no `Box` is needed.
+#[derive(Default)]
+pub(super) struct TreeNode {
+    dirs: BTreeMap<String, TreeNode>,
+    files: BTreeMap<String, FileNode>,
+    /// Total tasks anywhere beneath this directory.
+    count: usize,
+}
+
+struct FileNode {
+    task_indices: Vec<usize>,
+}
+
+pub(super) enum InlineRowKind {
+    Dir(String),
+    File(String),
+    Task,
+}
+
+pub(super) struct InlineRow {
+    pub(super) kind: InlineRowKind,
+    pub(super) text: String,
+}
+
+/// Build the directory tree from inline tasks. Task indices reference the
+/// original slice, so callers must keep the slice and tree in sync.
+pub(super) fn build_tree(tasks: &[InlineTask]) -> TreeNode {
+    let mut root = TreeNode::default();
+    for (ti, task) in tasks.iter().enumerate() {
+        let rel = task.span.path.to_string_lossy().replace('\\', "/");
+        let components: Vec<&str> = rel.split('/').filter(|c| !c.is_empty()).collect();
+        if components.is_empty() {
+            continue;
+        }
+        let (dirs, file) = components.split_at(components.len() - 1);
+        let filename = file[0].to_string();
+
+        let mut cur = &mut root;
+        cur.count += 1;
+        for d in dirs {
+            cur = cur.dirs.entry((*d).to_string()).or_default();
+            cur.count += 1;
+        }
+        cur.files
+            .entry(filename)
+            .or_insert_with(|| FileNode {
+                task_indices: Vec::new(),
+            })
+            .task_indices
+            .push(ti);
+    }
+    root
+}
+
+/// Flatten the tree into display rows. Expanded dirs/files reveal their
+/// contents; collapsed ones show a single line with an item count.
+pub(super) fn flatten_inline(
+    root: &TreeNode,
+    tasks: &[InlineTask],
+    expanded: &HashSet<String>,
+) -> Vec<InlineRow> {
+    let mut rows = Vec::new();
+    flatten_dir(root, "", 0, tasks, expanded, &mut rows);
+    rows
+}
+
+fn flatten_dir(
+    node: &TreeNode,
+    prefix: &str,
+    depth: usize,
+    tasks: &[InlineTask],
+    expanded: &HashSet<String>,
+    rows: &mut Vec<InlineRow>,
+) {
+    let indent = "  ".repeat(depth);
+    let task_indent = "  ".repeat(depth + 1);
+
+    for (name, dir) in &node.dirs {
+        let key = join_key(prefix, name);
+        let marker = if expanded.contains(&key) {
+            '▼'
+        } else {
+            '▸'
+        };
+        rows.push(InlineRow {
+            kind: InlineRowKind::Dir(key.clone()),
+            text: format!("{indent}{marker} {name}/  [{}]", dir.count),
+        });
+        if expanded.contains(&key) {
+            flatten_dir(dir, &key, depth + 1, tasks, expanded, rows);
+        }
+    }
+
+    for (name, file) in &node.files {
+        let key = join_key(prefix, name);
+        let marker = if expanded.contains(&key) {
+            '▼'
+        } else {
+            '▸'
+        };
+        rows.push(InlineRow {
+            kind: InlineRowKind::File(key.clone()),
+            text: format!("{indent}{marker} {name}  [{}]", file.task_indices.len()),
+        });
+        if expanded.contains(&key) {
+            for &ti in &file.task_indices {
+                let task = &tasks[ti];
+                let scope = task
+                    .scope
+                    .as_deref()
+                    .map(|s| format!("({s})"))
+                    .unwrap_or_default();
+                rows.push(InlineRow {
+                    kind: InlineRowKind::Task,
+                    text: format!(
+                        "{task_indent}L{}  {}{}  {}",
+                        task.span.line, task.keyword, scope, task.description
+                    ),
+                });
+            }
+        }
+    }
+}
+
+/// Directories containing any high-priority task start expanded.
+pub(super) fn auto_expand_keys(root: &TreeNode, tasks: &[InlineTask]) -> HashSet<String> {
+    let mut set = HashSet::new();
+    collect_auto(root, "", tasks, &mut set);
+    set
+}
+
+fn collect_auto(node: &TreeNode, prefix: &str, tasks: &[InlineTask], set: &mut HashSet<String>) {
+    for (name, dir) in &node.dirs {
+        let key = join_key(prefix, name);
+        if dir_has_high(dir, tasks) {
+            set.insert(key.clone());
+        }
+        collect_auto(dir, &key, tasks, set);
+    }
+}
+
+fn dir_has_high(dir: &TreeNode, tasks: &[InlineTask]) -> bool {
+    for file in dir.files.values() {
+        for &ti in &file.task_indices {
+            if tasks[ti].metadata.priority == Some(Priority::High) {
+                return true;
+            }
+        }
+    }
+    dir.dirs.values().any(|d| dir_has_high(d, tasks))
+}
+
+fn join_key(prefix: &str, name: &str) -> String {
+    if prefix.is_empty() {
+        name.to_string()
+    } else {
+        format!("{prefix}/{name}")
+    }
+}
+
+/// Render the inline tasks view.
 pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
-    let body = format!(
-        "Inline tasks: {}\n\n(Foldable directory tree arrives in the next slice.)\n\nPress Tab for Goals.",
-        app.inline_tasks.len()
-    );
-    let para = Paragraph::new(Text::from(body))
-        .block(Block::default().borders(Borders::ALL).title("Inline Tasks"));
-    f.render_widget(para, area);
+    let selected = app.inline_selected;
+    let items: Vec<ListItem> = app
+        .inline_rows
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let line = Line::from(row.text.clone());
+            if i == selected {
+                ListItem::new(line.style(Style::default().add_modifier(Modifier::REVERSED)))
+            } else {
+                ListItem::new(line)
+            }
+        })
+        .collect();
+
+    let title = format!("Inline Tasks  ({})", app.inline_tasks.len());
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
+    f.render_widget(list, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Metadata, Span};
+    use std::path::PathBuf;
+
+    fn task(path: &str, line: usize, kw: &str, prio: Option<Priority>) -> InlineTask {
+        InlineTask {
+            keyword: kw.into(),
+            scope: None,
+            description: "desc".into(),
+            metadata: Metadata {
+                priority: prio,
+                ..Default::default()
+            },
+            span: Span {
+                path: PathBuf::from(path),
+                line,
+            },
+        }
+    }
+
+    #[test]
+    fn builds_tree_with_counts() {
+        let tasks = vec![
+            task("src/a.rs", 1, "TODO", None),
+            task("src/a.rs", 9, "FIXME", None),
+            task("src/b.rs", 2, "TODO", None),
+            task("docs/g.md", 3, "TODO", None),
+        ];
+        let root = build_tree(&tasks);
+        assert_eq!(root.count, 4);
+        assert_eq!(root.dirs["src"].count, 3);
+        assert_eq!(root.dirs["docs"].count, 1);
+        assert_eq!(root.dirs["src"].files["a.rs"].task_indices.len(), 2);
+    }
+
+    #[test]
+    fn collapsed_shows_only_top_level() {
+        let tasks = vec![task("src/a.rs", 1, "TODO", None)];
+        let root = build_tree(&tasks);
+        let rows = flatten_inline(&root, &tasks, &HashSet::new());
+        assert_eq!(rows.len(), 1); // just "src/"
+        assert!(rows[0].text.contains("src/"));
+        assert!(rows[0].text.contains("[1]"));
+    }
+
+    #[test]
+    fn expanded_reveals_files_and_tasks() {
+        let tasks = vec![
+            task("src/a.rs", 1, "TODO", None),
+            task("src/a.rs", 9, "FIXME", None),
+        ];
+        let root = build_tree(&tasks);
+        let mut expanded = HashSet::new();
+        expanded.insert("src".to_string());
+        expanded.insert("src/a.rs".to_string());
+        let rows = flatten_inline(&root, &tasks, &expanded);
+        // src/ (expanded), a.rs (expanded), task@1, task@9
+        assert_eq!(rows.len(), 4);
+        assert!(rows[2].text.contains("L1"));
+        assert!(rows[3].text.contains("L9"));
+    }
+
+    #[test]
+    fn auto_expand_marks_high_priority_dirs_only() {
+        let tasks = vec![
+            task("a/x.rs", 1, "FIXME", Some(Priority::High)),
+            task("b/y.rs", 2, "TODO", None),
+        ];
+        let root = build_tree(&tasks);
+        let keys = auto_expand_keys(&root, &tasks);
+        assert!(keys.contains("a"));
+        assert!(!keys.contains("b"));
+    }
 }

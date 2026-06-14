@@ -31,6 +31,7 @@ mod goals;
 mod inline_view;
 
 use goals::{flatten_goals, GoalRow};
+use inline_view::{auto_expand_keys, build_tree, flatten_inline, InlineRow, TreeNode};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
@@ -135,6 +136,10 @@ struct App {
     goal_rows: Vec<GoalRow>,
     goal_selected: usize,
     expanded_goals: HashSet<usize>,
+    inline_root: TreeNode,
+    inline_rows: Vec<InlineRow>,
+    inline_selected: usize,
+    expanded_inline: HashSet<String>,
     quit: bool,
 }
 
@@ -142,6 +147,11 @@ impl App {
     fn new(goals: Vec<Goal>, inline_tasks: Vec<InlineTask>) -> Self {
         let expanded_goals = HashSet::new();
         let goal_rows = flatten_goals(&goals, &expanded_goals);
+
+        let inline_root = build_tree(&inline_tasks);
+        let expanded_inline = auto_expand_keys(&inline_root, &inline_tasks);
+        let inline_rows = flatten_inline(&inline_root, &inline_tasks, &expanded_inline);
+
         Self {
             goals,
             inline_tasks,
@@ -149,6 +159,10 @@ impl App {
             goal_rows,
             goal_selected: 0,
             expanded_goals,
+            inline_root,
+            inline_rows,
+            inline_selected: 0,
+            expanded_inline,
             quit: false,
         }
     }
@@ -161,46 +175,89 @@ impl App {
     }
 
     fn move_cursor(&mut self, delta: i32) {
-        let View::Goals = self.view else {
-            return; // inline view navigation arrives in a later slice
-        };
-        let len = self.goal_rows.len();
-        if len == 0 {
-            return;
+        match self.view {
+            View::Goals => {
+                let len = self.goal_rows.len();
+                if len != 0 {
+                    let next = (self.goal_selected as i32 + delta).clamp(0, (len - 1) as i32);
+                    self.goal_selected = next as usize;
+                }
+            }
+            View::Inline => {
+                let len = self.inline_rows.len();
+                if len != 0 {
+                    let next = (self.inline_selected as i32 + delta).clamp(0, (len - 1) as i32);
+                    self.inline_selected = next as usize;
+                }
+            }
         }
-        let next = (self.goal_selected as i32 + delta).clamp(0, (len - 1) as i32);
-        self.goal_selected = next as usize;
     }
 
     fn expand_selected(&mut self) {
-        if self.view != View::Goals {
-            return;
-        }
-        if let Some(gi) = self.selected_goal_header() {
-            if self.expanded_goals.insert(gi) {
-                self.goal_rows = flatten_goals(&self.goals, &self.expanded_goals);
+        match self.view {
+            View::Goals => {
+                if let Some(gi) = self.selected_goal_header() {
+                    if self.expanded_goals.insert(gi) {
+                        self.goal_rows = flatten_goals(&self.goals, &self.expanded_goals);
+                    }
+                }
+            }
+            View::Inline => {
+                if let Some(key) = self.selected_inline_key() {
+                    if self.expanded_inline.insert(key) {
+                        self.inline_rows = flatten_inline(
+                            &self.inline_root,
+                            &self.inline_tasks,
+                            &self.expanded_inline,
+                        );
+                    }
+                }
             }
         }
     }
 
     fn collapse_selected(&mut self) {
-        if self.view != View::Goals {
-            return;
-        }
-        if let Some(gi) = self.selected_goal_header() {
-            if self.expanded_goals.remove(&gi) {
-                self.goal_rows = flatten_goals(&self.goals, &self.expanded_goals);
+        match self.view {
+            View::Goals => {
+                if let Some(gi) = self.selected_goal_header() {
+                    if self.expanded_goals.remove(&gi) {
+                        self.goal_rows = flatten_goals(&self.goals, &self.expanded_goals);
+                    }
+                }
+            }
+            View::Inline => {
+                if let Some(key) = self.selected_inline_key() {
+                    if self.expanded_inline.remove(&key) {
+                        self.inline_rows = flatten_inline(
+                            &self.inline_root,
+                            &self.inline_tasks,
+                            &self.expanded_inline,
+                        );
+                    }
+                }
             }
         }
     }
 
-    /// If the selected row is a goal header, return its goal index.
+    /// If the selected goals-view row is a goal header, return its goal index.
     fn selected_goal_header(&self) -> Option<usize> {
         self.goal_rows
             .get(self.goal_selected)
             .and_then(|row| match row.kind {
                 goals::GoalRowKind::Header(gi) => Some(gi),
                 goals::GoalRowKind::Item => None,
+            })
+    }
+
+    /// If the selected inline-view row is a directory or file, return its key.
+    fn selected_inline_key(&self) -> Option<String> {
+        self.inline_rows
+            .get(self.inline_selected)
+            .and_then(|row| match &row.kind {
+                inline_view::InlineRowKind::Dir(k) | inline_view::InlineRowKind::File(k) => {
+                    Some(k.clone())
+                }
+                inline_view::InlineRowKind::Task => None,
             })
     }
 }
