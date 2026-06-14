@@ -9,6 +9,7 @@ pub mod metadata;
 pub mod model;
 pub mod parser;
 pub mod scanner;
+pub mod tui;
 
 use std::path::Path;
 

@@ -25,6 +25,10 @@ struct Cli {
     /// Enable verbose (debug) logging.
     #[arg(long)]
     verbose: bool,
+
+    /// Skip the TUI and print a summary instead (for scripts / no-TTY contexts).
+    #[arg(long)]
+    no_tui: bool,
 }
 
 fn main() -> Result<()> {
@@ -38,7 +42,11 @@ fn main() -> Result<()> {
     let ctx = ParseContext::from_config(&config)?;
     let result = scan(&options, &ctx)?;
 
-    print_summary(&result);
+    if cli.no_tui {
+        print_summary(&result);
+    } else {
+        trawl::tui::run(result)?;
+    }
     Ok(())
 }
 
