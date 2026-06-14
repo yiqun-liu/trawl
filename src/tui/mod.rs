@@ -24,7 +24,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::model::{Goal, InlineTask, Status};
+use crate::model::{Goal, GoalItem, InlineTask, Status};
 use crate::ScanResult;
 
 mod filter;
@@ -127,6 +127,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Enter => app.toggle_selected(),
         KeyCode::Char('h') | KeyCode::Backspace => app.collapse_selected(),
         KeyCode::Char('C') => app.collapse_completed(),
+        KeyCode::Char('Z') => app.collapse_all(),
         KeyCode::Char('f') => app.begin_filter(),
         KeyCode::Esc => app.clear_filter(),
         _ => {}
@@ -150,13 +151,13 @@ fn draw(f: &mut Frame, app: &App) {
     } else {
         match app.view {
             View::Goals => {
-                "Enter: toggle  l: expand  h: collapse  C: collapse done  j/k: move  Tab: Inline Tasks  q: quit".to_string()
+                "Enter: toggle  l: expand  h: collapse  C: collapse done  Z: collapse all  j/k: move  Tab: Inline Tasks  q: quit".to_string()
             }
             View::Inline if app.filter.is_some() => {
-                format!("filter: \"{}\"  f: edit  Esc: clear  Tab: Goals  q: quit", app.filter_query)
+                format!("filter: \"{}\"  f: edit  Esc: clear  Z: collapse all  Tab: Goals  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  Enter: toggle  l/h: expand/collapse  j/k: move  Tab: Goals  q: quit".to_string()
+                "f: filter  Enter: toggle  l/h: expand/collapse  Z: collapse all  j/k: move  Tab: Goals  q: quit".to_string()
             }
         }
     };
@@ -373,16 +374,70 @@ impl App {
         }
     }
 
-    /// `C`: collapse every completed (100%) goal in one keystroke.
+    /// `C`: collapse every node whose subtree is fully complete -- a goal
+    /// with status Completed, or a milestone that is itself checked and whose
+    /// leaves are all checked. Hierarchical: intermediate nodes fold too.
     fn collapse_completed(&mut self) {
-        let mut changed = false;
+        let mut to_remove: Vec<String> = Vec::new();
         for (gi, goal) in self.goals.iter().enumerate() {
-            if goal.status() == Status::Completed && self.goal_expanded.remove(&format!("g{gi}")) {
-                changed = true;
+            let gkey = format!("g{gi}");
+            if self.goal_expanded.contains(&gkey) && goal.status() == Status::Completed {
+                to_remove.push(gkey);
+            }
+            for (ci, item) in goal.items.iter().enumerate() {
+                collect_done_keys(
+                    item,
+                    &format!("g{gi}/{ci}"),
+                    &self.goal_expanded,
+                    &mut to_remove,
+                );
             }
         }
-        if changed {
-            self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
+        if to_remove.is_empty() {
+            return;
+        }
+        for key in to_remove {
+            self.goal_expanded.remove(&key);
+        }
+        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
+    }
+
+    /// `Z`: collapse everything in the active view.
+    fn collapse_all(&mut self) {
+        let changed = match self.view {
+            View::Goals => !self.goal_expanded.is_empty(),
+            View::Inline => !self.expanded_inline.is_empty(),
+        };
+        if !changed {
+            return;
+        }
+        match self.view {
+            View::Goals => self.goal_expanded.clear(),
+            View::Inline => self.expanded_inline.clear(),
+        };
+        self.rebuild_active();
+        self.clamp_active_cursor();
+    }
+
+    /// Keep the active cursor within the active view's row count.
+    fn clamp_active_cursor(&mut self) {
+        match self.view {
+            View::Goals => {
+                let len = self.goal_rows.len();
+                self.goal_selected = if len == 0 {
+                    0
+                } else {
+                    self.goal_selected.min(len - 1)
+                };
+            }
+            View::Inline => {
+                let len = self.inline_rows.len();
+                self.inline_selected = if len == 0 {
+                    0
+                } else {
+                    self.inline_selected.min(len - 1)
+                };
+            }
         }
     }
 
@@ -456,5 +511,113 @@ fn inline_row_node_key(row: &InlineRow) -> Option<&str> {
     match &row.kind {
         inline_view::InlineRowKind::Dir(k) | inline_view::InlineRowKind::File(k) => Some(k),
         inline_view::InlineRowKind::Task { .. } => None,
+    }
+}
+
+/// Count `(total_leaf, done_leaf)` beneath an item.
+fn item_leaf_counts(item: &GoalItem) -> (usize, usize) {
+    let mut total = 0usize;
+    let mut done = 0usize;
+    count_item_leaves(item, &mut total, &mut done);
+    (total, done)
+}
+
+fn count_item_leaves(item: &GoalItem, total: &mut usize, done: &mut usize) {
+    if item.children.is_empty() {
+        *total += 1;
+        if item.checked {
+            *done += 1;
+        }
+    } else {
+        for child in &item.children {
+            count_item_leaves(child, total, done);
+        }
+    }
+}
+
+/// A milestone is "done" when it is itself checked and all its leaves are
+/// checked.
+fn subtree_done(item: &GoalItem) -> bool {
+    if !item.checked {
+        return false;
+    }
+    let (total, done) = item_leaf_counts(item);
+    total > 0 && done == total
+}
+
+/// Collect keys of expanded, fully-done milestone nodes (recursive).
+fn collect_done_keys(
+    item: &GoalItem,
+    key: &str,
+    expanded: &HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    if item.children.is_empty() {
+        return;
+    }
+    if expanded.contains(key) && subtree_done(item) {
+        out.push(key.to_string());
+    }
+    for (ci, child) in item.children.iter().enumerate() {
+        collect_done_keys(child, &format!("{key}/{ci}"), expanded, out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Metadata, Span};
+    use std::path::PathBuf;
+
+    fn leaf(text: &str, checked: bool) -> GoalItem {
+        GoalItem {
+            text: text.into(),
+            checked,
+            metadata: Metadata::default(),
+            children: Vec::new(),
+            span: Span {
+                path: PathBuf::from("x.md"),
+                line: 1,
+            },
+        }
+    }
+
+    fn milestone(text: &str, checked: bool, children: Vec<GoalItem>) -> GoalItem {
+        GoalItem {
+            text: text.into(),
+            checked,
+            metadata: Metadata::default(),
+            children,
+            span: Span {
+                path: PathBuf::from("x.md"),
+                line: 1,
+            },
+        }
+    }
+
+    #[test]
+    fn subtree_done_requires_self_and_all_leaves_checked() {
+        // self checked, all leaves checked -> done
+        let m = milestone("m", true, vec![leaf("a", true), leaf("b", true)]);
+        assert!(subtree_done(&m));
+        // self unchecked -> not done even if leaves are
+        let m = milestone("m", false, vec![leaf("a", true), leaf("b", true)]);
+        assert!(!subtree_done(&m));
+        // a leaf unchecked -> not done
+        let m = milestone("m", true, vec![leaf("a", true), leaf("b", false)]);
+        assert!(!subtree_done(&m));
+    }
+
+    #[test]
+    fn subtree_done_handles_nested_milestones() {
+        // fully done nested
+        let inner = milestone("inner", true, vec![leaf("a", true)]);
+        let outer = milestone("outer", true, vec![inner]);
+        assert!(subtree_done(&outer));
+        // a deep leaf unchecked -> not done (intermediate milestone checkboxes
+        // are user-controlled and do not affect completion).
+        let inner = milestone("inner", true, vec![leaf("a", false)]);
+        let outer = milestone("outer", true, vec![inner]);
+        assert!(!subtree_done(&outer));
     }
 }

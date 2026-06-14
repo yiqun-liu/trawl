@@ -242,7 +242,9 @@ checkbox tree (milestones, tasks, sub-tasks).
 - Milestones show per-group ratio (e.g., `2/3`)
 - Color coding: done items dimmed, high-priority items highlighted
 - Completed goals render dimmed and struck-through; press `C` to collapse
-  every completed goal at once
+  every fully-complete node (a completed goal, or a milestone that is itself
+  `[x]` with all of its leaves checked). `Z` collapses everything in the
+  current view.
 
 ### TUI — Inline Tasks View
 
@@ -352,7 +354,8 @@ keybindings — the overlay adapts.
 │    s            cycle sort mode                  │
 │                                                  │
 │  Other                                           │
-│    C            collapse completed goals         │
+│    C            collapse fully-complete nodes    │
+│    Z            collapse all (current view)      │
 │    S            stats dashboard                  │
 │    e            edit file at cursor              │
 │    q            quit                             │
