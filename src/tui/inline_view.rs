@@ -215,14 +215,18 @@ fn flatten_dir(
                         let end = (line_idx + ctx as usize + 1).min(file_lines.len());
                         for (offset, content) in file_lines[start..end].iter().enumerate() {
                             let actual_idx = start + offset;
-                            if actual_idx == line_idx {
-                                continue;
-                            }
-                            let label = format!("▎L{}", actual_idx + 1);
+                            let is_task_line = actual_idx == line_idx;
+                            let marker = if is_task_line { '▸' } else { '▎' };
+                            let style = if is_task_line {
+                                Style::default()
+                            } else {
+                                Style::default().add_modifier(Modifier::DIM)
+                            };
+                            let label = format!("{marker}L{}", actual_idx + 1);
                             rows.push(InlineRow {
                                 kind: InlineRowKind::Context,
                                 text: format!("{task_indent}  {label}  {}", content),
-                                style: Style::default().add_modifier(Modifier::DIM),
+                                style,
                             });
                         }
                     }
