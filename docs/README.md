@@ -10,6 +10,9 @@ This directory contains project documentation.
 - `syntax.md` — formal syntax specification for goal trackers and inline
   tasks. Defines exactly what patterns trawl scans for and how it parses
   them, including grammar rules, metadata tokens, and parsing edge cases.
+- `writing-goals.md` — a practical, example-driven guide to creating
+  trawl-compatible `## GOAL TRACKER` sections. Includes a quick-reference
+  for AI agents.
 
 ## Development
 

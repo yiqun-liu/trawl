@@ -78,6 +78,8 @@ For the full configuration reference, see `docs/requirements.md`.
   reference, and phased implementation plan
 - `docs/syntax.md` — formal syntax specification for goal trackers and inline
   tasks
+- `docs/writing-goals.md` — practical guide to creating trawl-compatible goal
+  trackers (includes a quick reference for AI agents)
 - `docs/guidelines.md` — development guidelines and commit message conventions
 - `TODO.md` — implementation progress tracker (goal tracker format)
 - `docs/README.md` — documentation index

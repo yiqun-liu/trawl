@@ -57,6 +57,7 @@ binary's help system (`--help` and the `?` overlay).
 Start with the right document for the task:
 
 - **Understanding what trawl does**: `README.md`, then `docs/requirements.md`
+- **Writing trawl-compatible goal trackers**: `docs/writing-goals.md`
 - **Parser or syntax questions**: `docs/syntax.md`
 - **Implementation status or what to build next**: `TODO.md`
 - **Coding conventions and commit format**: `docs/guidelines.md`
