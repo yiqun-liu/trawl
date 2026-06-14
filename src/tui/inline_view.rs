@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
@@ -44,6 +44,7 @@ pub(super) enum InlineRowKind {
 pub(super) struct InlineRow {
     pub(super) kind: InlineRowKind,
     pub(super) text: String,
+    pub(super) style: Style,
 }
 
 /// Build the directory tree from inline tasks. Task indices reference the
@@ -109,6 +110,7 @@ fn flatten_dir(
         rows.push(InlineRow {
             kind: InlineRowKind::Dir(key.clone()),
             text: format!("{indent}{marker} {name}/  [{}]", dir.count),
+            style: Style::default(),
         });
         if expanded.contains(&key) {
             flatten_dir(dir, &key, depth + 1, tasks, expanded, rows);
@@ -125,6 +127,7 @@ fn flatten_dir(
         rows.push(InlineRow {
             kind: InlineRowKind::File(key.clone()),
             text: format!("{indent}{marker} {name}  [{}]", file.task_indices.len()),
+            style: Style::default(),
         });
         if expanded.contains(&key) {
             for &ti in &file.task_indices {
@@ -142,6 +145,7 @@ fn flatten_dir(
                         "{task_indent}L{}  {}{}  {}",
                         task.span.line, task.keyword, scope, task.description
                     ),
+                    style: priority_style(task.metadata.priority.as_ref()),
                 });
             }
         }
@@ -184,12 +188,22 @@ fn join_key(prefix: &str, name: &str) -> String {
     }
 }
 
+/// Foreground color for a task row based on its priority.
+fn priority_style(priority: Option<&Priority>) -> Style {
+    match priority {
+        Some(Priority::High) => Style::default().fg(Color::Red),
+        Some(Priority::Med) => Style::default().fg(Color::Yellow),
+        Some(Priority::Low) => Style::default().fg(Color::DarkGray),
+        _ => Style::default(),
+    }
+}
+
 /// Render the inline tasks view. Stateful so the viewport follows the cursor.
 pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
     let items: Vec<ListItem> = app
         .inline_rows
         .iter()
-        .map(|row| ListItem::new(Line::from(row.text.clone())))
+        .map(|row| ListItem::new(Line::from(row.text.clone()).style(row.style)))
         .collect();
 
     let title = if app.filter.is_some() {

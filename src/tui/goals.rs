@@ -10,20 +10,19 @@ use std::collections::HashSet;
 
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
 
-use crate::model::{Goal, GoalItem, Status};
+use crate::model::{Goal, GoalItem, Priority, Status};
 
 /// Which goal a row belongs to. Headers and milestones are foldable; tasks
 /// (leaves) are not.
 pub(super) enum GoalRowKind {
     Header {
         key: String,
-        completed: bool,
     },
     Milestone {
         key: String,
@@ -38,6 +37,7 @@ pub(super) enum GoalRowKind {
 pub(super) struct GoalRow {
     pub(super) kind: GoalRowKind,
     pub(super) text: String,
+    pub(super) style: Style,
 }
 
 /// Flatten goals into display rows according to the expand set.
@@ -53,11 +53,13 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
         let pct = (goal.progress() * 100.0).round() as u32;
         let completed = goal.status() == Status::Completed;
         rows.push(GoalRow {
-            kind: GoalRowKind::Header {
-                key: key.clone(),
-                completed,
-            },
+            kind: GoalRowKind::Header { key: key.clone() },
             text: format!("{marker} {}  {}  {}%", goal.title, goal.badge, pct),
+            style: if completed {
+                Style::default().add_modifier(Modifier::DIM | Modifier::CROSSED_OUT)
+            } else {
+                Style::default()
+            },
         });
         if expanded.contains(&key) {
             for (ci, item) in goal.items.iter().enumerate() {
@@ -66,6 +68,17 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
         }
     }
     rows
+}
+
+/// Style for a goal item: high priority is red; a checked leaf is dimmed.
+fn item_style(item: &GoalItem) -> Style {
+    if item.metadata.priority.as_ref() == Some(&Priority::High) {
+        return Style::default().fg(Color::Red);
+    }
+    if item.children.is_empty() && item.checked {
+        return Style::default().add_modifier(Modifier::DIM);
+    }
+    Style::default()
 }
 
 fn push_item(
@@ -78,6 +91,7 @@ fn push_item(
 ) {
     let indent = "  ".repeat(depth);
     let check = if item.checked { 'x' } else { ' ' };
+    let style = item_style(item);
 
     if item.children.is_empty() {
         // Leaf task: not foldable; remembers its parent so keys act on it.
@@ -86,6 +100,7 @@ fn push_item(
                 parent_key: parent_key.to_string(),
             },
             text: format!("{indent}[{check}] {}", item.text),
+            style,
         });
     } else {
         // Milestone: foldable.
@@ -95,6 +110,7 @@ fn push_item(
                 key: key.to_string(),
             },
             text: format!("{indent}{marker} [{check}] {}", item.text),
+            style,
         });
         if expanded.contains(key) {
             for (ci, child) in item.children.iter().enumerate() {
@@ -117,15 +133,7 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
     let items: Vec<ListItem> = app
         .goal_rows
         .iter()
-        .map(|row| {
-            let style = match &row.kind {
-                GoalRowKind::Header {
-                    completed: true, ..
-                } => Style::default().add_modifier(Modifier::DIM | Modifier::CROSSED_OUT),
-                _ => Style::default(),
-            };
-            ListItem::new(Line::from(row.text.clone()).style(style))
-        })
+        .map(|row| ListItem::new(Line::from(row.text.clone()).style(row.style)))
         .collect();
 
     let list = List::new(items)
