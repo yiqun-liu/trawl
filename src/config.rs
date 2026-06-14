@@ -77,7 +77,7 @@ impl Default for Config {
                     "NOTE".into(),
                 ],
                 keyword_case_sensitive: false,
-                goal_section_names: vec!["GOAL TRACKER".into()],
+                goal_section_names: vec!["GOAL TRACKER".into(), "TODO".into()],
                 include: Vec::new(),
                 exclude: Vec::new(),
                 max_file_size: "1MB".into(),

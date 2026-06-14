@@ -413,7 +413,7 @@ exclude = ["docs/", "tests/fixtures/"]
 [scan]
 keywords = ["TODO", "FIXME", "HACK", "XXX", "BUG", "NOTE"]
 keyword_case_sensitive = false
-goal_section_names = ["GOAL TRACKER"]
+goal_section_names = ["GOAL TRACKER", "TODO"]
 include = []  # e.g. ["*.md", "*.rs", "*.py"] — restrict to specific file types
 exclude = ["target/", "node_modules/", ".git/"]  # built-in defaults; project config merges with these (union)
 max_file_size = "1MB"

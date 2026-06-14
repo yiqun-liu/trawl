@@ -4,16 +4,13 @@ A goal tracker is a standard markdown section that trawl auto-discovers.
 You do not register or configure it — you write it once in any markdown
 file and forget it. The files *are* the database.
 
-## The one heading you need
+## The heading trawl looks for
 
-Any level of heading containing `GOAL TRACKER` (case-insensitive).
+- `## GOAL TRACKER` — the canonical name.
+- `## TODO` — also recognised by default.
 
-```markdown
-## GOAL TRACKER
-```
-
-Only the **first** match in a file is parsed. The section runs until the
-next heading of the *same or higher level*, or end of file.
+The match is **exact** and **case-insensitive**. Only the first matching heading
+in a file is parsed.
 
 Everything outside the heading is free-form notes — ignored by trawl.
 
@@ -149,8 +146,9 @@ You do not set any of these fields — trawl computes them.
 
 > You are writing markdown for the `trawl` TUI tool. Follow these rules:
 >
-> - Create a `## GOAL TRACKER` section. Only the first match in a file is
->   parsed. The section ends at the next same-or-higher-level heading.
+> - Create a `## GOAL TRACKER` (or `## TODO`) section. Only the first match
+>   in a file is parsed. The section ends at the next same-or-higher-level
+>   heading.
 > - Use `- [x]` (done) or `- [ ]` (pending) for every item. List markers
 >   may be `-`, `*`, or `+`. `X` and `✓` also mean checked.
 > - Indentation (2 spaces per level) defines the hierarchy: items with
