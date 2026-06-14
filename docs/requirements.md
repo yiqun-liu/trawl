@@ -217,28 +217,29 @@ checkbox tree (milestones, tasks, sub-tasks).
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ GOALS & MILESTONES                              [Tab: Inline Tasks] │
+│ GOALS & MILESTONES                              [Tab: Inline] │
 ├──────────────────────────────────────────────────────────────┤
-│  ▼ ★ CS146s-2025                  ml/llm/    33%             │
-│    [x] Week 1: Introduction                  2/3             │
-│      [x] Lecture 1: How an LLM is made                       │
-│      [x] Assignment 1: Basic prompting                        │
-│      [ ] Reading: Prompt Engineering Guide !low              │
-│    [ ] Week 2: Power Prompting               0/2             │
-│      [ ] Lecture 3 !high @yiqun                               │
-│      [ ] Assignment 2                                         │
-│    [ ] Buy textbook                                           │
-│  ▸ ★ Understanding Linux VM Manager  misc/books/  90%        │
-│  ▸ ★ Sprint 15: Auth Refactor         (root)       55%       │
+│ ▼ CS146s-2025                  ml/llm/    [======----]  55%  │
+│   [x] Week 1: Introduction                               2/3 │
+│     [x] Lecture 1: How an LLM is made                        │
+│     [x] Assignment 1: Basic prompting                       │
+│     [ ] Reading: Prompt Engineering Guide !low               │
+│   [ ] Week 2: Power Prompting                           0/2 │
+│     [ ] Lecture 3 !high @yiqun                               │
+│     [ ] Assignment 2                                         │
+│   [ ] Buy textbook                                           │
+│ ▸ Understanding Linux VM Manager  misc/books/  [========-]  90%│
+│ ▸ Sprint 15: Auth Refactor       (root)     [=======--]  55%   │
 ├──────────────────────────────────────────────────────────────┤
-│ Enter: expand  Space: toggle  e: edit  Tab: Inline Tasks     │
+│ Enter: toggle  l: expand  h: collapse  Space: ✓  e: edit Tab │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 **Behaviors:**
 
-- `Enter` expands/collapses a goal to show its checkbox tree inline
-- `Space` toggles a checkbox (writes `[x]`/`[ ]` back to the file)
+- `j`/`k` move, `l` expand, `h` collapse, `Enter` toggle (on a leaf, toggles its parent)
+- `Space` toggles a checkbox in the source file
+- `e` opens the editor at the selected item's file and line
 - `j/k` navigates the tree (goals, milestones, tasks)
 - Milestones show per-group ratio (e.g., `2/3`)
 - Color coding: done items dimmed, high-priority items highlighted
