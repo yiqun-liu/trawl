@@ -229,7 +229,7 @@ fn draw_cell_edit(f: &mut Frame, input: &str) {
         .borders(ratatui::widgets::Borders::ALL)
         .title("Edit state  (Enter: save  Esc: cancel)");
     f.render_widget(
-        ratatui::widgets::Paragraph::new(Line::from(format!("> {}", input))).block(block),
+        ratatui::widgets::Paragraph::new(Line::from(format!("> {}█", input))).block(block),
         area,
     );
 }
