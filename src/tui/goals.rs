@@ -52,10 +52,7 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
     // Pass 1: compute max prefix width (marker + title + badge + padding).
     let max_prefix = goals
         .iter()
-        .map(|goal| {
-            // marker (1) + space (1) + title + "  " + badge + "  "
-            2 + goal.title.len() + 2 + goal.badge.len() + 2
-        })
+        .map(|goal| format!("▸ {}  {}  ", goal.title, goal.badge).len())
         .max()
         .unwrap_or(40);
 
@@ -385,5 +382,30 @@ mod tests {
         // no checkbox -> None
         assert!(flip_checkbox("just text").is_none());
         assert!(flip_checkbox("- not a checkbox").is_none());
+    }
+
+    #[test]
+    fn header_progress_bars_are_aligned() {
+        let goals = vec![
+            goal("Short", vec![leaf("a", true)]),
+            goal(
+                "A Very Long Goal Title That Spans Many Characters",
+                vec![leaf("b", false)],
+            ),
+        ];
+        let rows = flatten_goals(&goals, &HashSet::new());
+
+        let bar_starts: Vec<usize> = rows
+            .iter()
+            .filter(|r| matches!(r.kind, GoalRowKind::Header { .. }))
+            .map(|r| r.text.rfind('[').unwrap())
+            .collect();
+
+        assert_eq!(bar_starts.len(), 2);
+        assert_eq!(
+            bar_starts[0], bar_starts[1],
+            "progress bars should align at the same column: {:?}",
+            bar_starts
+        );
     }
 }
