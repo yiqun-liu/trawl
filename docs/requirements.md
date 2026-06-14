@@ -287,15 +287,21 @@ in the tree.
 
 ### Filtering
 
-| Filter | Description |
-|--------|-------------|
-| Keyword | Only `FIXME` items, etc. |
-| Tag | Only `#security` tagged items |
-| Priority | Only `!high` items |
-| Owner | Only `@yiqun` items |
-| Full-text search | Substring search in descriptions |
-| Stale only | Items older than threshold (default: 365 days) |
-| Path glob | `impl/kernel/**/*.c` |
+Press `f` to open a filter prompt; type a query and press `Enter`. Each term
+is `field:value` or free text; all terms are AND-ed. `Esc` clears the active
+filter. Filtering applies to the inline tasks view.
+
+| Term | Example | Matches |
+|------|---------|---------|
+| `kw` / `keyword` | `kw:FIXME` | tasks with that keyword |
+| `tag` | `tag:security` | tasks with that tag |
+| `owner` | `owner:alice` | tasks owned by that person |
+| `pri` / `priority` | `pri:high` | tasks at that priority |
+| `path` | `path:auth` | tasks whose path contains the substring |
+| *(free text)* | `null user` | tasks whose description contains it |
+
+Not yet implemented: stale-only (Phase 3, needs git blame) and full path
+globs (`path:` is a substring match today).
 
 ### Sorting
 
@@ -341,9 +347,9 @@ keybindings — the overlay adapts.
 │    g            toggle git blame                 │
 │                                                  │
 │  Filtering & Sorting                             │
-│    f            open filter menu                 │
+│    f            filter prompt (kw: pri: tag: …)  │
+│    Esc          clear filter                     │
 │    s            cycle sort mode                  │
-│    /            search by text                   │
 │                                                  │
 │  Other                                           │
 │    C            collapse completed goals         │

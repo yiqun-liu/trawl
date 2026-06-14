@@ -186,7 +186,15 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
         .map(|row| ListItem::new(Line::from(row.text.clone())))
         .collect();
 
-    let title = format!("Inline Tasks  ({})", app.inline_tasks.len());
+    let title = if app.filter.is_some() {
+        format!(
+            "Inline Tasks  ({}/{})",
+            app.inline_displayed.len(),
+            app.inline_tasks.len()
+        )
+    } else {
+        format!("Inline Tasks  ({})", app.inline_displayed.len())
+    };
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));

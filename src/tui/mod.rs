@@ -27,9 +27,11 @@ use ratatui::{
 use crate::model::{Goal, InlineTask, Status};
 use crate::ScanResult;
 
+mod filter;
 mod goals;
 mod inline_view;
 
+use filter::Filter;
 use goals::{flatten_goals, GoalRow, GoalRowKind};
 use inline_view::{auto_expand_keys, build_tree, flatten_inline, InlineRow, TreeNode};
 
@@ -39,6 +41,12 @@ type Tui = Terminal<CrosstermBackend<Stdout>>;
 enum View {
     Goals,
     Inline,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Normal,
+    FilterInput,
 }
 
 /// Run the TUI over a scan result. Restores the terminal on exit or panic.
@@ -91,11 +99,25 @@ fn run_loop(terminal: &mut Tui, app: &mut App) -> Result<()> {
 }
 
 fn handle_key(app: &mut App, key: event::KeyEvent) {
-    // Ctrl+C always quits.
+    // Ctrl+C always quits, even mid-filter.
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         app.quit = true;
         return;
     }
+
+    if app.mode == Mode::FilterInput {
+        match key.code {
+            KeyCode::Enter => app.apply_filter(),
+            KeyCode::Esc => app.cancel_filter(),
+            KeyCode::Backspace => {
+                app.filter_input.pop();
+            }
+            KeyCode::Char(c) => app.filter_input.push(c),
+            _ => {}
+        }
+        return;
+    }
+
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') => app.quit = true,
         KeyCode::Tab => app.toggle_view(),
@@ -105,6 +127,8 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Enter => app.toggle_selected(),
         KeyCode::Char('h') | KeyCode::Backspace => app.collapse_selected(),
         KeyCode::Char('C') => app.collapse_completed(),
+        KeyCode::Char('f') => app.begin_filter(),
+        KeyCode::Esc => app.clear_filter(),
         _ => {}
     }
 }
@@ -121,14 +145,23 @@ fn draw(f: &mut Frame, app: &App) {
         View::Inline => inline_view::draw(f, app, main),
     }
 
-    let hint = match app.view {
-        View::Goals => {
-            "Enter: toggle  l: expand  h: collapse  C: collapse done  j/k: move  Tab: Inline Tasks  q: quit"
+    let footer_text = if app.mode == Mode::FilterInput {
+        format!("filter> {}", app.filter_input)
+    } else {
+        match app.view {
+            View::Goals => {
+                "Enter: toggle  l: expand  h: collapse  C: collapse done  j/k: move  Tab: Inline Tasks  q: quit".to_string()
+            }
+            View::Inline if app.filter.is_some() => {
+                format!("filter: \"{}\"  f: edit  Esc: clear  Tab: Goals  q: quit", app.filter_query)
+            }
+            View::Inline => {
+                "f: filter  Enter: toggle  l/h: expand/collapse  j/k: move  Tab: Goals  q: quit".to_string()
+            }
         }
-        View::Inline => "Tab: Goals  q: quit",
     };
-    let footer_widget =
-        Paragraph::new(Line::from(hint)).style(Style::default().add_modifier(Modifier::REVERSED));
+    let footer_widget = Paragraph::new(Line::from(footer_text))
+        .style(Style::default().add_modifier(Modifier::REVERSED));
     f.render_widget(footer_widget, footer);
 }
 
@@ -136,7 +169,12 @@ fn draw(f: &mut Frame, app: &App) {
 struct App {
     goals: Vec<Goal>,
     inline_tasks: Vec<InlineTask>,
+    inline_displayed: Vec<InlineTask>,
     view: View,
+    mode: Mode,
+    filter: Option<Filter>,
+    filter_query: String,
+    filter_input: String,
     goal_rows: Vec<GoalRow>,
     goal_selected: usize,
     goal_expanded: HashSet<String>,
@@ -152,14 +190,20 @@ impl App {
         let goal_expanded = HashSet::new();
         let goal_rows = flatten_goals(&goals, &goal_expanded);
 
-        let inline_root = build_tree(&inline_tasks);
-        let expanded_inline = auto_expand_keys(&inline_root, &inline_tasks);
-        let inline_rows = flatten_inline(&inline_root, &inline_tasks, &expanded_inline);
+        let inline_displayed = inline_tasks.clone();
+        let inline_root = build_tree(&inline_displayed);
+        let expanded_inline = auto_expand_keys(&inline_root, &inline_displayed);
+        let inline_rows = flatten_inline(&inline_root, &inline_displayed, &expanded_inline);
 
         Self {
             goals,
             inline_tasks,
+            inline_displayed,
             view: View::Goals,
+            mode: Mode::Normal,
+            filter: None,
+            filter_query: String::new(),
+            filter_input: String::new(),
             goal_rows,
             goal_selected: 0,
             goal_expanded,
@@ -168,6 +212,67 @@ impl App {
             inline_selected: 0,
             expanded_inline,
             quit: false,
+        }
+    }
+
+    /// `f`: begin (or edit) the filter query.
+    fn begin_filter(&mut self) {
+        self.mode = Mode::FilterInput;
+        self.filter_input = self.filter_query.clone();
+    }
+
+    /// Enter in filter mode: parse and apply the typed query.
+    fn apply_filter(&mut self) {
+        let parsed = Filter::parse(&self.filter_input);
+        if parsed.is_empty() {
+            self.filter = None;
+            self.filter_query.clear();
+        } else {
+            self.filter_query = self.filter_input.clone();
+            self.filter = Some(parsed);
+        }
+        self.mode = Mode::Normal;
+        self.rebuild_inline();
+        self.inline_selected = 0;
+    }
+
+    /// Esc in filter mode: discard the typed text, keep the prior filter.
+    fn cancel_filter(&mut self) {
+        self.mode = Mode::Normal;
+    }
+
+    /// Esc in normal mode: clear the active filter entirely.
+    fn clear_filter(&mut self) {
+        if self.filter.take().is_some() {
+            self.filter_query.clear();
+            self.rebuild_inline();
+            self.inline_selected = 0;
+        }
+    }
+
+    /// Recompute the displayed inline tasks from the current filter and
+    /// rebuild the tree/rows. The user's expand choices are preserved; keys
+    /// for directories that no longer exist are ignored by the flattener.
+    fn rebuild_inline(&mut self) {
+        self.inline_displayed = match &self.filter {
+            None => self.inline_tasks.clone(),
+            Some(f) => self
+                .inline_tasks
+                .iter()
+                .filter(|t| f.matches(t))
+                .cloned()
+                .collect(),
+        };
+        self.inline_root = build_tree(&self.inline_displayed);
+        self.inline_rows = flatten_inline(
+            &self.inline_root,
+            &self.inline_displayed,
+            &self.expanded_inline,
+        );
+        if !self.inline_rows.is_empty() {
+            self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
+        } else {
+            self.inline_selected = 0;
         }
     }
 

@@ -96,14 +96,14 @@ For syntax specification, see `docs/syntax.md`.
 ### Phase 2 — Interaction
 
 - [ ] Filtering
-  - [ ] Implement keyword filter (only `FIXME`, etc.)
-  - [ ] Implement tag filter (only `#security`, etc.)
-  - [ ] Implement priority filter (only `!high`, etc.)
-  - [ ] Implement owner filter (only `@yiqun`, etc.)
-  - [ ] Implement full-text search (substring in descriptions)
+  - [x] Implement keyword filter (only `FIXME`, etc.)
+  - [x] Implement tag filter (only `#security`, etc.)
+  - [x] Implement priority filter (only `!high`, etc.)
+  - [x] Implement owner filter (only `@yiqun`, etc.)
+  - [x] Implement full-text search (substring in descriptions)
   - [ ] Implement stale-only filter (depends on Phase 3 stale detection)
-  - [ ] Implement path glob filter (`impl/kernel/**/*.c`)
-  - [ ] Add filter UI (popup or prompt)
+  - [ ] Implement path glob filter (`impl/kernel/**/*.c`) — substring match for now
+  - [x] Add filter UI (popup or prompt)
 - [ ] Sorting
   - [ ] Implement priority sort (high to med to low to untagged)
   - [ ] Implement age sort (oldest first — depends on Phase 3 git blame)
