@@ -115,23 +115,23 @@ For syntax specification, see `docs/syntax.md`.
   - [ ] Render expanded view inline within the tree
   - [ ] Preserve cursor position during expand/collapse
 - [ ] Color Coding
-  - [ ] Define priority color scheme (red/yellow/gray)
+  - [x] Define priority color scheme (red/yellow/gray)
   - [ ] Define keyword color scheme (cyan for TODO, red for FIXME, etc.)
-  - [ ] Dim completed goal tasks
-  - [ ] Highlight high-priority items
+  - [x] Dim completed goal tasks
+  - [x] Highlight high-priority items
 - [ ] Checkbox Toggle
   - [ ] Implement targeted file write (modify only the checkbox character)
   - [ ] Update in-memory tree state after write
   - [ ] Recompute progress for affected goal and parent milestones
   - [ ] Handle file write errors gracefully
-- [ ] Stats Bar
-  - [ ] Count tasks by priority (high/med/low/untagged)
+- [x] Stats Bar
+  - [x] Count tasks by priority (high/med/low/untagged)
   - [ ] Count stale tasks (depends on Phase 3)
-  - [ ] Render stats line in TUI header
-- [ ] Help Overlay
-  - [ ] Define keybinding sets per view (goals, inline, stats)
-  - [ ] Render help overlay as a centered popup
-  - [ ] Close on `?` or `Esc`
+  - [x] Render stats line in TUI header
+- [x] Help Overlay
+  - [x] Define keybinding sets per view (goals, inline, stats)
+  - [x] Render help overlay as a centered popup
+  - [x] Close on `?` or `Esc`
 - [ ] Editor Integration
   - [ ] Suspend TUI and save terminal state on `e` keybinding
   - [ ] Spawn `$EDITOR`/`$VISUAL` at cursor's file and line number
