@@ -382,4 +382,39 @@ mod tests {
         assert!(keys.contains("a"));
         assert!(!keys.contains("b"));
     }
+
+    #[test]
+    fn keyword_style_colors() {
+        // Tests that each keyword gets a non-default style (panics on mismatch)
+        assert_ne!(keyword_style("TODO"), Style::default());
+        assert_ne!(keyword_style("fixme"), Style::default());
+        assert_ne!(keyword_style("HACK"), Style::default());
+        assert_ne!(keyword_style("note"), Style::default());
+        assert_ne!(keyword_style("BUG"), Style::default());
+    }
+
+    #[test]
+    fn flatten_shows_blame_when_flag_set() {
+        let task = InlineTask {
+            keyword: "TODO".into(),
+            scope: None,
+            description: "a task".into(),
+            metadata: Metadata::default(),
+            span: Span {
+                path: PathBuf::from("a.rs"),
+                line: 1,
+            },
+            blame_author: Some("alice".into()),
+            blame_date: None,
+            blame_commit: None,
+        };
+        let tasks = vec![task];
+        let root = build_tree(&tasks);
+        let mut expanded = HashSet::new();
+        expanded.insert("a.rs".to_string());
+        let rows = flatten_inline(&root, &tasks, &expanded, false);
+        assert!(!rows[1].text.contains("alice"));
+        let rows = flatten_inline(&root, &tasks, &expanded, true);
+        assert!(rows[1].text.contains("alice"));
+    }
 }

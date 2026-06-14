@@ -445,4 +445,11 @@ mod tests {
             bar_starts
         );
     }
+
+    #[test]
+    fn progress_bar_format() {
+        assert_eq!(progress_bar(0), "----------");
+        assert_eq!(progress_bar(50), "=====-----");
+        assert_eq!(progress_bar(100), "==========");
+    }
 }

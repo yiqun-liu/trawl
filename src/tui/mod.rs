@@ -593,6 +593,7 @@ impl App {
     /// `g`: toggle blame annotations on inline task rows.
     fn toggle_blame(&mut self) {
         self.show_blame = !self.show_blame;
+        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded, self.show_blame);
         self.inline_root = build_tree(&self.inline_displayed);
         self.inline_rows = flatten_inline(
             &self.inline_root,
@@ -604,6 +605,11 @@ impl App {
             self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
         } else {
             self.inline_selected = 0;
+        }
+        if !self.goal_rows.is_empty() {
+            self.goal_selected = self.goal_selected.min(self.goal_rows.len() - 1);
+        } else {
+            self.goal_selected = 0;
         }
     }
 
@@ -1394,5 +1400,18 @@ mod tests {
             .unwrap();
         app.expand_all();
         assert_eq!(inline_row_id(&app.inline_rows[app.inline_selected]), "b");
+    }
+
+    #[test]
+    fn toggling_blame_rebuilds_rows() {
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."), HashMap::new());
+        assert!(!app.show_blame);
+        app.toggle_blame();
+        assert!(app.show_blame);
+        assert!(!app.goal_rows.is_empty());
+        assert!(app.goal_selected < app.goal_rows.len());
+        app.toggle_blame();
+        assert!(!app.show_blame);
+        assert!(!app.goal_rows.is_empty());
     }
 }

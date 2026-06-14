@@ -32,7 +32,7 @@ impl Filter {
                     "owner" => f.owner = Some(value),
                     "pri" | "priority" => f.priority = Some(Priority::parse(&value)),
                     "path" => f.path = Some(value),
-                    "stale" => f.stale = Some(true),
+                    "stale" => f.stale = Some(value.eq_ignore_ascii_case("yes")),
                     // Unknown field: ignore the token.
                     _ => {}
                 }
@@ -197,5 +197,20 @@ mod tests {
             ..Default::default()
         };
         assert!(Filter::parse("pri:med").matches(&task("TODO", "x", meta, "a.rs")));
+    }
+
+    #[test]
+    fn stale_filter_matches_old_tasks() {
+        let mut t = task("TODO", "desc", Metadata::default(), "a.rs");
+        // Set blame_date to 400 days ago (past the 365 threshold).
+        t.blame_date = chrono::Utc::now()
+            .naive_utc()
+            .checked_sub_signed(chrono::Duration::days(400));
+        assert!(Filter::parse("stale").matches(&t));
+        assert!(Filter::parse("stale:yes").matches(&t));
+        assert!(!Filter::parse("stale:no").matches(&t));
+        // A task without blame data is never stale.
+        let t2 = task("TODO", "desc", Metadata::default(), "a.rs");
+        assert!(!Filter::parse("stale").matches(&t2));
     }
 }
