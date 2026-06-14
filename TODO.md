@@ -101,15 +101,15 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Implement priority filter (only `!high`, etc.)
   - [x] Implement owner filter (only `@yiqun`, etc.)
   - [x] Implement full-text search (substring in descriptions)
-  - [ ] Implement stale-only filter (depends on Phase 3 stale detection)
+  - [x] Implement stale-only filter (depends on Phase 3 stale detection)
   - [ ] Implement path glob filter (`impl/kernel/**/*.c`) — substring match for now
   - [x] Add filter UI (popup or prompt)
-- [ ] Sorting
-  - [ ] Implement priority sort (high to med to low to untagged)
+- [x] Sorting
+  - [x] Implement priority sort (high to med to low to untagged)
   - [ ] Implement age sort (oldest first — depends on Phase 3 git blame)
-  - [ ] Implement file path sort (alphabetical, default)
-  - [ ] Implement keyword sort (group all FIXMEs, then TODOs, etc.)
-  - [ ] Add sort mode cycling (`s` key)
+  - [x] Implement file path sort (alphabetical, default)
+  - [x] Implement keyword sort (group all FIXMEs, then TODOs, etc.)
+  - [x] Add sort mode cycling (`s` key)
 - [x] Inline Expansion
   - [x] Read context lines from source file around task line number
   - [x] Render expanded view inline within the tree
@@ -126,7 +126,7 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Handle file write errors gracefully
 - [x] Stats Bar
   - [x] Count tasks by priority (high/med/low/untagged)
-  - [ ] Count stale tasks (depends on Phase 3)
+  - [x] Count stale tasks (depends on Phase 3)
   - [x] Render stats line in TUI header
 - [x] Help Overlay
   - [x] Define keybinding sets per view (goals, inline, stats)
@@ -140,21 +140,21 @@ For syntax specification, see `docs/syntax.md`.
 
 ### Phase 3 — Git + Stats
 
-- [ ] Git Blame Enrichment
+- [x] Git Blame Enrichment
   - [x] Implement blame lookup using `git2` crate
   - [x] Store blame data alongside inline task results
-  - [ ] Display blame line in inline expansion view
-  - [ ] Add `g` keybinding to toggle blame display
+  - [x] Display blame line in inline expansion view
+  - [x] Add `g` keybinding to toggle blame display
 - [x] Stale Detection
   - [x] Calculate age from blame commit date
   - [x] Apply configurable stale threshold (`stale_threshold_days`)
   - [x] Mark stale items in scan results
   - [x] Surface stale count in stats bar
 - [ ] Stats Dashboard
-  - [ ] Count tasks by priority, keyword, and tag
-  - [ ] Calculate top directories by task count
+  - [x] Count tasks by priority, keyword, and tag
+  - [x] Calculate top directories by task count
   - [ ] Render bar charts in TUI
-  - [ ] Add `S` keybinding to toggle stats view
+  - [x] Add `S` keybinding to toggle stats view
 
 ## Details
 
