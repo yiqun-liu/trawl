@@ -302,10 +302,11 @@ filter. Filtering applies to the inline tasks view.
 | `owner` | `owner:alice` | tasks owned by that person |
 | `pri` / `priority` | `pri:high` | tasks at that priority |
 | `path` | `path:auth` | tasks whose path contains the substring |
+| `stale` | `stale` | tasks older than the stale threshold |
 | *(free text)* | `null user` | tasks whose description contains it |
 
-Not yet implemented: stale-only (Phase 3, needs git blame) and full path
-globs (`path:` is a substring match today).
+Not yet implemented: full path globs (`path:` is a substring match today).
+Stale filtering depends on git blame enrichment (see Git Integration).
 
 ### Sorting
 
@@ -333,11 +334,53 @@ Toggle from either view to see aggregate statistics:
 
 ### Git Integration
 
-| Feature | Description |
-|---------|-------------|
-| Blame enrichment | Author, date, commit hash for each item |
-| Age calculation | Days since item was added |
-| Stale detection | Flag items older than configurable threshold |
+Each inline task can carry git blame data: author, commit date, and short
+commit hash. This enables age-based stale detection.
+
+#### Blame enrichment
+
+After inline tasks are parsed, the scanner enriches each task's source
+line with blame data via the `git2` crate (libgit2 bindings). One blame
+lookup is performed per file (all tasks in the same file share the result),
+so performance scales with the number of files, not tasks.
+
+Blame data is stored on each [`InlineTask`]:
+- `blame_author: Option<String>` — author name, or `None` if not available
+- `blame_date: Option<NaiveDateTime>` — commit date, or `None`
+- `blame_commit: Option<String>` — short commit hash (8 chars), or `None`
+
+Enrichment only runs when `display.show_git_blame = true` (default: `false`)
+to avoid the overhead of spawning libgit2 for every scan. A TUI `g` key
+toggles blame info in the inline expansion view.
+
+#### Age and stale detection
+
+A task's **age** is the number of days between today and `blame_date`.
+Tasks without blame data (new files, non‑git repos) are never considered
+stale.
+
+A task is **stale** when its age exceeds `display.stale_threshold_days`
+(default: 365). Stale tasks are flagged in the inline tasks view
+(dimmed or shown with a `[stale]` marker) and count towards the stale
+total in the stats bar and stats dashboard.
+
+#### Filter integration
+
+The unified filter prompt supports a `stale` term:
+- `stale` or `stale:yes` — show only items that are stale.
+- `stale` can be combined with other terms, e.g.
+  `kw:TODO stale` for stale TODOs.
+
+#### Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `display.show_git_blame` | `false` | Enable blame enrichment (adds git2 overhead) |
+| `display.stale_threshold_days` | `365` | Age after which an item is considered stale |
+
+Enabling blame adds a `git2` dependency and a per-scan blame pass. When
+`show_git_blame` is `false`, none of the git integration runs and no
+`git2` symbols are linked.
 
 ### Help System
 

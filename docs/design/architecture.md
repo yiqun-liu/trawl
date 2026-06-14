@@ -8,9 +8,8 @@ Implementation-level design. This document describes *how* trawl is built;
 
 The initial implementation covers the **headless scan → parse pipeline**
 (Phases 1–4 of the roadmap): scaffold, domain model, configuration, scanner,
-and both parsers. The TUI (Phase 5), filtering/sorting, and git integration
-are deferred to later revisions and are not described here beyond their
-hooks in the data model.
+and both parsers. The TUI, filtering/sorting, and git integration
+are described at a high level.
 
 ```
              ┌─────────────────────────┐
@@ -101,6 +100,10 @@ pub struct InlineTask {
     pub description: String,
     pub metadata: Metadata,
     pub span: Span,
+    // Populated by blame enrichment when display.show_git_blame is true.
+    pub blame_author: Option<String>,
+    pub blame_date: Option<chrono::NaiveDateTime>,
+    pub blame_commit: Option<String>,
 }
 
 /// A checkbox node OR a table row (unified).
