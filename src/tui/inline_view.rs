@@ -253,8 +253,14 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
     } else {
         app.inline_displayed.len().to_string()
     };
-    let title =
-        format!("Inline Tasks  ({count})  high:{high} med:{med} low:{low} untagged:{untagged}");
+    let sort_label = match app.sort_mode {
+        super::SortMode::Path => "path",
+        super::SortMode::Priority => "priority",
+        super::SortMode::Keyword => "keyword",
+    };
+    let title = format!(
+        "Inline Tasks  ({count})  [{sort_label}]  high:{high} med:{med} low:{low} untagged:{untagged}"
+    );
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));

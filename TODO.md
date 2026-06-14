@@ -75,9 +75,9 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Implement clean terminal restoration on exit / panic
 - [ ] TUI Goals View
   - [x] Render goal list (title, location badge, progress %)
-  - [ ] Render progress bars for each goal
+  - [x] Render progress bars for each goal
   - [x] Implement inline expand/collapse of checkbox tree
-  - [ ] Render milestone per-group ratios (e.g., `2/3`)
+  - [x] Render milestone per-group ratios (e.g., `2/3`)
   - [ ] Render task metadata (priority badge, owner, tags)
 - [x] TUI Inline Tasks View
   - [x] Build directory tree structure from scan results
@@ -85,11 +85,11 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Display item counts `[N]` next to each dir/file node
   - [x] Render task details (line number, keyword, description)
   - [x] Implement auto-expand for directories containing high-priority tasks
-- [ ] Keyboard Navigation
+- [x] Keyboard Navigation
   - [x] `j`/`k` — move down/up
   - [x] `l`/`h` — expand/collapse (vim-style)
   - [x] `Enter` — toggle expand (inline context for tasks)
-  - [ ] `Space` — toggle checkbox (in goals view)
+  - [x] `Space` — toggle checkbox (in goals view)
   - [x] `Tab` — switch Goals and Inline Tasks
   - [x] `q` — quit
 
@@ -114,16 +114,16 @@ For syntax specification, see `docs/syntax.md`.
   - [ ] Read context lines from source file around task line number
   - [ ] Render expanded view inline within the tree
   - [ ] Preserve cursor position during expand/collapse
-- [ ] Color Coding
+- [x] Color Coding
   - [x] Define priority color scheme (red/yellow/gray)
-  - [ ] Define keyword color scheme (cyan for TODO, red for FIXME, etc.)
+  - [x] Define keyword color scheme (cyan for TODO, red for FIXME, etc.)
   - [x] Dim completed goal tasks
   - [x] Highlight high-priority items
-- [ ] Checkbox Toggle
-  - [ ] Implement targeted file write (modify only the checkbox character)
-  - [ ] Update in-memory tree state after write
-  - [ ] Recompute progress for affected goal and parent milestones
-  - [ ] Handle file write errors gracefully
+- [x] Checkbox Toggle
+  - [x] Implement targeted file write (modify only the checkbox character)
+  - [x] Update in-memory tree state after write
+  - [x] Recompute progress for affected goal and parent milestones
+  - [x] Handle file write errors gracefully
 - [x] Stats Bar
   - [x] Count tasks by priority (high/med/low/untagged)
   - [ ] Count stale tasks (depends on Phase 3)
@@ -132,11 +132,11 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Define keybinding sets per view (goals, inline, stats)
   - [x] Render help overlay as a centered popup
   - [x] Close on `?` or `Esc`
-- [ ] Editor Integration
-  - [ ] Suspend TUI and save terminal state on `e` keybinding
-  - [ ] Spawn `$EDITOR`/`$VISUAL` at cursor's file and line number
-  - [ ] Fall back to `vi` (Unix) or `notepad` (Windows) if neither variable is set
-  - [ ] Restore TUI state on editor exit
+- [x] Editor Integration
+  - [x] Suspend TUI and save terminal state on `e` keybinding
+  - [x] Spawn `$EDITOR`/`$VISUAL` at cursor's file and line number
+  - [x] Fall back to `vi` (Unix) or `notepad` (Windows) if neither variable is set
+  - [x] Restore TUI state on editor exit
 
 ### Phase 3 — Git + Stats
 

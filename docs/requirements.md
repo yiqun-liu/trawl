@@ -309,12 +309,19 @@ globs (`path:` is a substring match today).
 
 ### Sorting
 
+Press `s` to cycle sort modes for the inline tasks view. The directory
+tree structure is always preserved; the sort affects the order of tasks
+within each file and the order files appear within their directory.
+
 | Sort | Description |
 |------|-------------|
-| Priority | high → med → low → untagged |
-| Age | Oldest first (highlights stale debt) |
-| File path | Alphabetical (default) |
-| Keyword | Group all FIXMEs, then TODOs, etc. |
+| Path | Alphabetical by file path (default). |
+| Priority | High priority tasks first; within same priority, path order. |
+| Keyword | Grouped by keyword (FIXME, then HACK, then TODO, …); within same keyword, path order. |
+| Age | Oldest first (requires git blame, Phase 3). |
+
+The current sort mode is shown in the view title. Age sorting depends on
+git blame enrichment (Phase 3) and is not available until then.
 
 ### Stats Dashboard
 

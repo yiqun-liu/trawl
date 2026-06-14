@@ -52,6 +52,24 @@ enum Mode {
     CellEdit,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SortMode {
+    Path,
+    Priority,
+    Keyword,
+}
+
+impl SortMode {
+    /// Cycle to the next active mode (excludes `Age` until Phase 3).
+    fn next(self) -> Self {
+        match self {
+            SortMode::Path => SortMode::Priority,
+            SortMode::Priority => SortMode::Keyword,
+            SortMode::Keyword => SortMode::Path,
+        }
+    }
+}
+
 /// Run the TUI over a scan result. Restores the terminal on exit or panic.
 pub fn run(result: ScanResult, root: PathBuf, headers: HashMap<String, Vec<String>>) -> Result<()> {
     let mut app = App::new(result.goals, result.inline_tasks, root, headers);
@@ -170,6 +188,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('Z') => app.collapse_all(),
         KeyCode::Char('X') => app.expand_all(),
         KeyCode::Char('f') => app.begin_filter(),
+        KeyCode::Char('s') => app.cycle_sort(),
         KeyCode::Esc => app.clear_filter(),
         KeyCode::Char('e') => app.edit_selected(),
         KeyCode::Char(' ') => app.toggle_checkbox(),
@@ -200,10 +219,10 @@ fn draw(f: &mut Frame, app: &App) {
                 "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  C: done  Z: all  X: expand all  j/k  Tab  q".to_string()
             }
             View::Inline if app.filter.is_some() => {
-                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
+                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  Enter: toggle  l/h: fold  e: edit  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
+                "f: filter  s: sort  Enter: toggle  l/h: fold  e: edit  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
             }
         }
     };
@@ -304,6 +323,7 @@ struct App {
     inline_displayed: Vec<InlineTask>,
     root: PathBuf,
     headers: HashMap<String, Vec<String>>,
+    sort_mode: SortMode,
     view: View,
     mode: Mode,
     filter: Option<Filter>,
@@ -352,6 +372,7 @@ impl App {
             inline_displayed,
             root,
             headers,
+            sort_mode: SortMode::Path,
             view: View::Goals,
             mode: Mode::Normal,
             filter: None,
@@ -407,8 +428,8 @@ impl App {
         }
     }
 
-    /// Recompute the displayed inline tasks from the current filter, then
-    /// rebuild the tree/rows. Called when the filter changes.
+    /// Recompute the displayed inline tasks from the current filter, apply
+    /// the current sort mode, then rebuild the tree/rows.
     fn rebuild_inline(&mut self) {
         self.inline_displayed = match &self.filter {
             None => self.inline_tasks.clone(),
@@ -419,7 +440,58 @@ impl App {
                 .cloned()
                 .collect(),
         };
+        self.sort_inline();
         self.rebuild_inline_rows();
+        if !self.inline_rows.is_empty() {
+            self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
+        } else {
+            self.inline_selected = 0;
+        }
+    }
+
+    /// Sort `inline_displayed` by the current sort mode.
+    fn sort_inline(&mut self) {
+        match self.sort_mode {
+            SortMode::Path => self.inline_displayed.sort_by(|a, b| {
+                a.span
+                    .path
+                    .cmp(&b.span.path)
+                    .then_with(|| a.span.line.cmp(&b.span.line))
+            }),
+            SortMode::Priority => self.inline_displayed.sort_by_key(|t| {
+                let prio = match &t.metadata.priority {
+                    Some(crate::model::Priority::High) => 0,
+                    Some(crate::model::Priority::Med) => 1,
+                    Some(crate::model::Priority::Low) => 2,
+                    Some(crate::model::Priority::Other(_)) => 3,
+                    None => 4,
+                };
+                (prio, t.span.path.clone(), t.span.line)
+            }),
+            SortMode::Keyword => self.inline_displayed.sort_by_key(|t| {
+                let kw = match t.keyword.to_ascii_lowercase().as_str() {
+                    "fixme" | "bug" => 0,
+                    "hack" | "xxx" => 1,
+                    "todo" => 2,
+                    "note" => 3,
+                    _ => 4,
+                };
+                (kw, t.span.path.clone(), t.span.line)
+            }),
+        }
+    }
+
+    /// `s`: cycle to the next sort mode and re-sort the displayed tasks.
+    fn cycle_sort(&mut self) {
+        self.sort_mode = self.sort_mode.next();
+        self.sort_inline();
+        // rebuild tree/rows from sorted inline_displayed, keep filter
+        self.inline_root = build_tree(&self.inline_displayed);
+        self.inline_rows = flatten_inline(
+            &self.inline_root,
+            &self.inline_displayed,
+            &self.expanded_inline,
+        );
         if !self.inline_rows.is_empty() {
             self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
         } else {
