@@ -152,7 +152,7 @@ fn flatten_dir(
                         "{task_indent}L{}  {}{}  {}{}",
                         task.span.line, task.keyword, scope, task.description, badge
                     ),
-                    style: priority_style(task.metadata.priority.as_ref()),
+                    style: keyword_style(&task.keyword),
                 });
             }
         }
@@ -213,12 +213,13 @@ fn collect_node_keys(node: &TreeNode, prefix: &str, out: &mut Vec<String>) {
     }
 }
 
-/// Foreground color for a task row based on its priority.
-fn priority_style(priority: Option<&Priority>) -> Style {
-    match priority {
-        Some(Priority::High) => Style::default().fg(Color::Red),
-        Some(Priority::Med) => Style::default().fg(Color::Yellow),
-        Some(Priority::Low) => Style::default().fg(Color::DarkGray),
+/// Foreground color for a task row based on its keyword.
+fn keyword_style(keyword: &str) -> Style {
+    match keyword.to_ascii_lowercase().as_str() {
+        "todo" => Style::default().fg(Color::Cyan),
+        "fixme" | "bug" => Style::default().fg(Color::Red),
+        "hack" | "xxx" => Style::default().fg(Color::Magenta),
+        "note" => Style::default().fg(Color::Blue),
         _ => Style::default(),
     }
 }
