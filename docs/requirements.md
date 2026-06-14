@@ -369,6 +369,22 @@ the cursor's file and line number. The TUI resumes when the editor
 exits. Falls back to `vi` (Unix) or `notepad` (Windows) if neither
 variable is set.
 
+## Logging
+
+trawl logs to a **file**, never the terminal — the TUI uses the alternate
+screen, so stderr output would corrupt the display. `--verbose` selects the
+`debug` level; otherwise the level is `warn`.
+
+- `--log-file <path>` writes logs to `<path>`.
+- Without it, logs go to the platform-conventional location:
+  - Linux: `$XDG_STATE_HOME/trawl/trawl.log` (default
+    `~/.local/state/trawl/trawl.log`)
+  - macOS: `~/Library/Logs/trawl/trawl.log`
+  - Windows: `%LOCALAPPDATA%\trawl\logs\trawl.log`
+
+Logged events include: skipped unreadable files (`warn`), skipped binary
+files (`debug`), walk errors (`warn`), and configuration load (`debug`).
+
 ## Configuration
 
 Configuration is layered — later sources override earlier:
