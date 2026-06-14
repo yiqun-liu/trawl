@@ -27,9 +27,11 @@ pub(super) enum GoalRowKind {
     Milestone {
         key: String,
     },
-    /// A leaf task. `parent_key` is the foldable node it belongs to (a
-    /// milestone or the goal header), so expand/collapse act on the parent.
+    /// A leaf task. `key` is its own position (for toggle); `parent_key` is
+    /// the foldable node it belongs to (a milestone or the goal header), so
+    /// expand/collapse act on the parent.
     Task {
+        key: String,
         parent_key: String,
     },
 }
@@ -81,6 +83,35 @@ fn item_style(item: &GoalItem) -> Style {
     Style::default()
 }
 
+/// If `line` contains a markdown checkbox `- [x]`/`[ ]`/`[X]`/`[✓]`, return a
+/// copy with that box flipped (`[ ]` <-> `[x]`). Operates at char level so
+/// the multibyte `✓` is handled correctly.
+pub(super) fn flip_checkbox(line: &str) -> Option<String> {
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+    while i + 2 < chars.len() {
+        if chars[i] == '[' && chars[i + 2] == ']' {
+            let c = chars[i + 1];
+            if c == 'x' || c == 'X' || c == ' ' || c == '✓' {
+                let new_c = if c == ' ' { 'x' } else { ' ' };
+                let mut out = String::with_capacity(line.len());
+                for ch in &chars[..i] {
+                    out.push(*ch);
+                }
+                out.push('[');
+                out.push(new_c);
+                out.push(']');
+                for ch in &chars[i + 3..] {
+                    out.push(*ch);
+                }
+                return Some(out);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 fn push_item(
     item: &GoalItem,
     key: &str,
@@ -97,6 +128,7 @@ fn push_item(
         // Leaf task: not foldable; remembers its parent so keys act on it.
         rows.push(GoalRow {
             kind: GoalRowKind::Task {
+                key: key.to_string(),
                 parent_key: parent_key.to_string(),
             },
             text: format!("{indent}[{check}] {}", item.text),
@@ -247,7 +279,7 @@ mod tests {
         // a leaf carries its parent milestone's key, so fold acts on the parent
         assert!(matches!(
             &rows[2].kind,
-            GoalRowKind::Task { parent_key } if parent_key == "g0/0"
+            GoalRowKind::Task { parent_key, .. } if parent_key == "g0/0"
         ));
     }
 
@@ -277,5 +309,23 @@ mod tests {
         let rows = flatten_goals(&goals, &HashSet::new());
         assert!(rows[0].text.contains("100%"));
         assert!(rows[0].text.contains("(root)"));
+    }
+
+    #[test]
+    fn flip_checkbox_toggles_state_char() {
+        assert_eq!(
+            flip_checkbox("- [x] Week 1").as_deref(),
+            Some("- [ ] Week 1")
+        );
+        assert_eq!(
+            flip_checkbox("  - [ ] task").as_deref(),
+            Some("  - [x] task")
+        );
+        // uppercase X and the multibyte check mark both count as checked
+        assert_eq!(flip_checkbox("- [X] a").as_deref(), Some("- [ ] a"));
+        assert_eq!(flip_checkbox("- [✓] a").as_deref(), Some("- [ ] a"));
+        // no checkbox -> None
+        assert!(flip_checkbox("just text").is_none());
+        assert!(flip_checkbox("- not a checkbox").is_none());
     }
 }

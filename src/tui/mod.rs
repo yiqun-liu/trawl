@@ -6,7 +6,9 @@
 //! `goals.rs` so it can be unit-tested without a terminal.
 
 use std::collections::HashSet;
+use std::fs;
 use std::io::{self, Stdout};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -50,8 +52,8 @@ enum Mode {
 }
 
 /// Run the TUI over a scan result. Restores the terminal on exit or panic.
-pub fn run(result: ScanResult) -> Result<()> {
-    let mut app = App::new(result.goals, result.inline_tasks);
+pub fn run(result: ScanResult, root: PathBuf) -> Result<()> {
+    let mut app = App::new(result.goals, result.inline_tasks, root);
 
     let mut terminal = setup_terminal()?;
     // If the main loop errors, still restore the terminal before returning.
@@ -140,6 +142,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('Z') => app.collapse_all(),
         KeyCode::Char('f') => app.begin_filter(),
         KeyCode::Esc => app.clear_filter(),
+        KeyCode::Char(' ') => app.toggle_checkbox(),
         KeyCode::Char('?') => app.show_help = true,
         _ => {}
     }
@@ -162,7 +165,7 @@ fn draw(f: &mut Frame, app: &App) {
     } else {
         match app.view {
             View::Goals => {
-                "Enter: toggle  l: expand  h: collapse  C: collapse done  Z: collapse all  j/k: move  Tab: Inline Tasks  q: quit".to_string()
+                "Enter: toggle  l: expand  h: collapse  Space: toggle box  C: done  Z: all  j/k  Tab  q".to_string()
             }
             View::Inline if app.filter.is_some() => {
                 format!("filter: \"{}\"  f: edit  Esc: clear  Z: collapse all  Tab: Goals  q: quit", app.filter_query)
@@ -201,6 +204,7 @@ fn help_text(view: View) -> Vec<Line<'static>> {
         Line::from("  j / k        move down / up"),
         Line::from("  l / h        expand / collapse"),
         Line::from("  Enter        toggle  (on a leaf, toggles its parent)"),
+        Line::from("  Space        toggle checkbox  (goals view; writes back)"),
         Line::from("  Tab          switch Goals <-> Inline Tasks"),
         Line::from(""),
         Line::from("Goals & Milestones"),
@@ -248,6 +252,7 @@ struct App {
     goals: Vec<Goal>,
     inline_tasks: Vec<InlineTask>,
     inline_displayed: Vec<InlineTask>,
+    root: PathBuf,
     view: View,
     mode: Mode,
     filter: Option<Filter>,
@@ -265,7 +270,7 @@ struct App {
 }
 
 impl App {
-    fn new(goals: Vec<Goal>, inline_tasks: Vec<InlineTask>) -> Self {
+    fn new(goals: Vec<Goal>, inline_tasks: Vec<InlineTask>, root: PathBuf) -> Self {
         let goal_expanded = HashSet::new();
         let goal_rows = flatten_goals(&goals, &goal_expanded);
 
@@ -278,6 +283,7 @@ impl App {
             goals,
             inline_tasks,
             inline_displayed,
+            root,
             view: View::Goals,
             mode: Mode::Normal,
             filter: None,
@@ -412,6 +418,50 @@ impl App {
             self.rebuild_active();
             self.seek_cursor(&key);
         }
+    }
+
+    /// `Space` (goals view): flip the selected item's checkbox `[x]`/`[ ]` in
+    /// the source file and in memory. Goal headers and non-checkbox lines are
+    /// left untouched.
+    fn toggle_checkbox(&mut self) {
+        if self.view != View::Goals {
+            return;
+        }
+        let Some(item_key) = self.selected_goal_item_key() else {
+            return; // goal header, or nothing selected
+        };
+        let Some((gi, path)) = parse_item_key(&item_key) else {
+            return;
+        };
+        let Some((rel, line)) = goal_item_span(&self.goals, gi, &path) else {
+            return;
+        };
+
+        let abs = self.root.join(&rel);
+        let Ok(content) = fs::read_to_string(&abs) else {
+            log::warn!("toggle: cannot read {}", abs.display());
+            return;
+        };
+        let mut lines: Vec<String> = content.split('\n').map(String::from).collect();
+        let idx = line.saturating_sub(1);
+        if idx >= lines.len() {
+            log::warn!("toggle: line {line} out of range in {}", abs.display());
+            return;
+        }
+        let Some(new_line) = goals::flip_checkbox(&lines[idx]) else {
+            log::debug!("toggle: not a checkbox line at {}:{}", abs.display(), line);
+            return;
+        };
+        lines[idx] = new_line;
+        if fs::write(&abs, lines.join("\n")).is_err() {
+            log::warn!("toggle: cannot write {}", abs.display());
+            return;
+        }
+
+        if let Some(item) = goal_item_mut(&mut self.goals, gi, &path) {
+            item.checked = !item.checked;
+        }
+        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
     }
 
     /// The key of the selected row in the active view. For a leaf, this is
@@ -559,7 +609,18 @@ impl App {
             .get(self.goal_selected)
             .map(|row| match &row.kind {
                 GoalRowKind::Header { key, .. } | GoalRowKind::Milestone { key } => key.clone(),
-                GoalRowKind::Task { parent_key } => parent_key.clone(),
+                GoalRowKind::Task { parent_key, .. } => parent_key.clone(),
+            })
+    }
+
+    /// The own key of the selected goal *item* (milestone or leaf), or None
+    /// for a goal header. Used by `Space` to locate the `GoalItem` to toggle.
+    fn selected_goal_item_key(&self) -> Option<String> {
+        self.goal_rows
+            .get(self.goal_selected)
+            .and_then(|row| match &row.kind {
+                GoalRowKind::Header { .. } => None,
+                GoalRowKind::Milestone { key } | GoalRowKind::Task { key, .. } => Some(key.clone()),
             })
     }
 
@@ -583,6 +644,47 @@ fn goal_row_node_key(row: &GoalRow) -> Option<&str> {
         GoalRowKind::Header { key, .. } | GoalRowKind::Milestone { key } => Some(key),
         GoalRowKind::Task { .. } => None,
     }
+}
+
+/// Parse an item key `g{gi}/{c0}/{c1}/...` into the goal index and the
+/// child-index path to the item.
+fn parse_item_key(key: &str) -> Option<(usize, Vec<usize>)> {
+    let mut parts = key.split('/');
+    let gi = parts.next()?.strip_prefix('g')?.parse::<usize>().ok()?;
+    let path = parts.filter_map(|p| p.parse::<usize>().ok()).collect();
+    Some((gi, path))
+}
+
+/// Borrow the goal item at `(gi, path)` immutably.
+fn goal_item_ref<'a>(goals: &'a [Goal], gi: usize, path: &[usize]) -> Option<&'a GoalItem> {
+    let goal = goals.get(gi)?;
+    if path.is_empty() {
+        return None;
+    }
+    let mut cur = goal.items.get(path[0])?;
+    for &idx in &path[1..] {
+        cur = cur.children.get(idx)?;
+    }
+    Some(cur)
+}
+
+/// Borrow the goal item at `(gi, path)` mutably.
+fn goal_item_mut<'a>(goals: &'a mut [Goal], gi: usize, path: &[usize]) -> Option<&'a mut GoalItem> {
+    let goal = goals.get_mut(gi)?;
+    if path.is_empty() {
+        return None;
+    }
+    let mut cur = goal.items.get_mut(path[0])?;
+    for &idx in &path[1..] {
+        cur = cur.children.get_mut(idx)?;
+    }
+    Some(cur)
+}
+
+/// The `(relative_path, 1-based line)` of the goal item at `(gi, path)`.
+fn goal_item_span(goals: &[Goal], gi: usize, path: &[usize]) -> Option<(PathBuf, usize)> {
+    let item = goal_item_ref(goals, gi, path)?;
+    Some((item.span.path.clone(), item.span.line))
 }
 
 /// The foldable key of an inline-view row, or `None` for leaves.
