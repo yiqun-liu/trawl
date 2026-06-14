@@ -188,6 +188,24 @@ fn join_key(prefix: &str, name: &str) -> String {
     }
 }
 
+/// Every directory and file key in the tree, for expand-all.
+pub(super) fn all_node_keys(root: &TreeNode) -> Vec<String> {
+    let mut keys = Vec::new();
+    collect_node_keys(root, "", &mut keys);
+    keys
+}
+
+fn collect_node_keys(node: &TreeNode, prefix: &str, out: &mut Vec<String>) {
+    for (name, dir) in &node.dirs {
+        let key = join_key(prefix, name);
+        out.push(key.clone());
+        collect_node_keys(dir, &key, out);
+    }
+    for name in node.files.keys() {
+        out.push(join_key(prefix, name));
+    }
+}
+
 /// Foreground color for a task row based on its priority.
 fn priority_style(priority: Option<&Priority>) -> Style {
     match priority {

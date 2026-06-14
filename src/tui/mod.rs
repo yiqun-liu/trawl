@@ -140,6 +140,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('h') | KeyCode::Backspace => app.collapse_selected(),
         KeyCode::Char('C') => app.collapse_completed(),
         KeyCode::Char('Z') => app.collapse_all(),
+        KeyCode::Char('X') => app.expand_all(),
         KeyCode::Char('f') => app.begin_filter(),
         KeyCode::Esc => app.clear_filter(),
         KeyCode::Char(' ') => app.toggle_checkbox(),
@@ -165,13 +166,13 @@ fn draw(f: &mut Frame, app: &App) {
     } else {
         match app.view {
             View::Goals => {
-                "Enter: toggle  l: expand  h: collapse  Space: toggle box  C: done  Z: all  j/k  Tab  q".to_string()
+                "Enter: toggle  l: expand  h: collapse  Space: toggle box  C: done  Z: all  X: expand all  j/k  Tab  q".to_string()
             }
             View::Inline if app.filter.is_some() => {
-                format!("filter: \"{}\"  f: edit  Esc: clear  Z: collapse all  Tab: Goals  q: quit", app.filter_query)
+                format!("filter: \"{}\"  f: edit  Esc: clear  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  Enter: toggle  l/h: expand/collapse  Z: collapse all  j/k: move  Tab: Goals  q: quit".to_string()
+                "f: filter  Enter: toggle  l/h: fold  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
             }
         }
     };
@@ -210,6 +211,7 @@ fn help_text(view: View) -> Vec<Line<'static>> {
         Line::from("Goals & Milestones"),
         Line::from("  C            collapse fully-complete nodes"),
         Line::from("  Z            collapse all (current view)"),
+        Line::from("  X            expand all (current view)"),
     ];
     if view == View::Inline {
         lines.push(Line::from(""));
@@ -506,7 +508,9 @@ impl App {
     /// `C`: collapse every node whose subtree is fully complete -- a goal
     /// with status Completed, or a milestone that is itself checked and whose
     /// leaves are all checked. Hierarchical: intermediate nodes fold too.
+    /// The cursor stays on its previous entry (or its nearest surviving node).
     fn collapse_completed(&mut self) {
+        let anchor = self.current_key();
         let mut to_remove: Vec<String> = Vec::new();
         for (gi, goal) in self.goals.iter().enumerate() {
             let gkey = format!("g{gi}");
@@ -529,6 +533,30 @@ impl App {
             self.goal_expanded.remove(&key);
         }
         self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
+        if let Some(k) = anchor {
+            self.seek_cursor(&k);
+        }
+    }
+
+    /// `X`: expand every node in the active view.
+    fn expand_all(&mut self) {
+        let added: Vec<String> = match self.view {
+            View::Goals => goals::all_node_keys(&self.goals),
+            View::Inline => inline_view::all_node_keys(&self.inline_root),
+        };
+        let target = match self.view {
+            View::Goals => &mut self.goal_expanded,
+            View::Inline => &mut self.expanded_inline,
+        };
+        let mut changed = false;
+        for key in added {
+            if target.insert(key) {
+                changed = true;
+            }
+        }
+        if changed {
+            self.rebuild_active();
+        }
     }
 
     /// `Z`: collapse everything in the active view.

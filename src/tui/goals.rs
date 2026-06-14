@@ -72,6 +72,29 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
     rows
 }
 
+/// Every foldable node key in the goal forest (goals + milestones), for
+/// expand-all.
+pub(super) fn all_node_keys(goals: &[Goal]) -> Vec<String> {
+    let mut keys = Vec::new();
+    for (gi, goal) in goals.iter().enumerate() {
+        keys.push(format!("g{gi}"));
+        for (ci, item) in goal.items.iter().enumerate() {
+            collect_milestone_keys(item, &format!("g{gi}/{ci}"), &mut keys);
+        }
+    }
+    keys
+}
+
+fn collect_milestone_keys(item: &GoalItem, key: &str, out: &mut Vec<String>) {
+    if item.children.is_empty() {
+        return;
+    }
+    out.push(key.to_string());
+    for (ci, child) in item.children.iter().enumerate() {
+        collect_milestone_keys(child, &format!("{key}/{ci}"), out);
+    }
+}
+
 /// Style for a goal item: high priority is red; a checked leaf is dimmed.
 fn item_style(item: &GoalItem) -> Style {
     if item.metadata.priority.as_ref() == Some(&Priority::High) {
