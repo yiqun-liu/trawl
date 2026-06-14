@@ -34,10 +34,11 @@ struct FileNode {
 pub(super) enum InlineRowKind {
     Dir(String),
     File(String),
-    /// A leaf task. `parent_key` is the file it lives in, so expand/collapse
-    /// act on that file.
+    /// A leaf task. `parent_key` is the file it lives in (for fold actions);
+    /// `line` is its source line (for a stable cursor identity).
     Task {
         parent_key: String,
+        line: usize,
     },
 }
 
@@ -145,6 +146,7 @@ fn flatten_dir(
                 rows.push(InlineRow {
                     kind: InlineRowKind::Task {
                         parent_key: key.clone(),
+                        line: task.span.line,
                     },
                     text: format!(
                         "{task_indent}L{}  {}{}  {}{}",
@@ -330,7 +332,7 @@ mod tests {
         // a leaf carries its file's key, so fold acts on the parent file
         assert!(matches!(
             &rows[2].kind,
-            InlineRowKind::Task { parent_key } if parent_key == "src/a.rs"
+            InlineRowKind::Task { parent_key, .. } if parent_key == "src/a.rs"
         ));
     }
 

@@ -418,7 +418,6 @@ impl App {
         };
         if was_open {
             self.rebuild_active();
-            self.seek_cursor(&key);
         }
     }
 
@@ -463,7 +462,7 @@ impl App {
         if let Some(item) = goal_item_mut(&mut self.goals, gi, &path) {
             item.checked = !item.checked;
         }
-        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
+        self.rebuild_active();
     }
 
     /// The key of the selected row in the active view. For a leaf, this is
@@ -475,34 +474,55 @@ impl App {
         }
     }
 
-    /// Rebuild the active view's rows from its expand set.
+    /// Rebuild the active view's rows from its expand set, then re-anchor the
+    /// cursor onto the same entry (or its nearest surviving ancestor) so the
+    /// cursor never drifts across a rebuild.
     fn rebuild_active(&mut self) {
+        let anchor = self.cursor_id();
         match self.view {
             View::Goals => {
                 self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
             }
             View::Inline => self.rebuild_inline_rows(),
         }
+        self.reanchor(anchor);
     }
 
-    /// Move the active-view cursor onto the row whose node key is `key`.
-    fn seek_cursor(&mut self, key: &str) {
-        let pos = match self.view {
-            View::Goals => self
-                .goal_rows
-                .iter()
-                .position(|r| goal_row_node_key(r).is_some_and(|k| k == key)),
+    /// The stable identity of the selected row, used to track the cursor
+    /// across rebuilds.
+    fn cursor_id(&self) -> Option<String> {
+        match self.view {
+            View::Goals => self.goal_rows.get(self.goal_selected).map(goal_row_id),
             View::Inline => self
                 .inline_rows
-                .iter()
-                .position(|r| inline_row_node_key(r).is_some_and(|k| k == key)),
-        };
-        if let Some(i) = pos {
-            match self.view {
-                View::Goals => self.goal_selected = i,
-                View::Inline => self.inline_selected = i,
-            }
+                .get(self.inline_selected)
+                .map(inline_row_id),
         }
+    }
+
+    /// Move the cursor to the row whose id is `id`; if that row is gone (hidden
+    /// by a collapse), walk up to the nearest surviving ancestor; if none,
+    /// clamp into range.
+    fn reanchor(&mut self, id: Option<String>) {
+        let mut candidate = id;
+        while let Some(cur) = candidate {
+            let pos = match self.view {
+                View::Goals => self.goal_rows.iter().position(|r| goal_row_id(r) == cur),
+                View::Inline => self
+                    .inline_rows
+                    .iter()
+                    .position(|r| inline_row_id(r) == cur),
+            };
+            if let Some(i) = pos {
+                match self.view {
+                    View::Goals => self.goal_selected = i,
+                    View::Inline => self.inline_selected = i,
+                }
+                return;
+            }
+            candidate = ancestor_id(&cur);
+        }
+        self.clamp_active_cursor();
     }
 
     /// `C`: collapse every node whose subtree is fully complete -- a goal
@@ -510,7 +530,6 @@ impl App {
     /// leaves are all checked. Hierarchical: intermediate nodes fold too.
     /// The cursor stays on its previous entry (or its nearest surviving node).
     fn collapse_completed(&mut self) {
-        let anchor = self.current_key();
         let mut to_remove: Vec<String> = Vec::new();
         for (gi, goal) in self.goals.iter().enumerate() {
             let gkey = format!("g{gi}");
@@ -532,10 +551,7 @@ impl App {
         for key in to_remove {
             self.goal_expanded.remove(&key);
         }
-        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
-        if let Some(k) = anchor {
-            self.seek_cursor(&k);
-        }
+        self.rebuild_active();
     }
 
     /// `X`: expand every node in the active view.
@@ -573,7 +589,6 @@ impl App {
             View::Inline => self.expanded_inline.clear(),
         };
         self.rebuild_active();
-        self.clamp_active_cursor();
     }
 
     /// Keep the active cursor within the active view's row count.
@@ -604,30 +619,23 @@ impl App {
         let Some(key) = self.current_key() else {
             return;
         };
-        let now_open = match self.view {
+        match self.view {
             View::Goals => {
                 if self.goal_expanded.contains(&key) {
                     self.goal_expanded.remove(&key);
-                    false
                 } else {
-                    self.goal_expanded.insert(key.clone());
-                    true
+                    self.goal_expanded.insert(key);
                 }
             }
             View::Inline => {
                 if self.expanded_inline.contains(&key) {
                     self.expanded_inline.remove(&key);
-                    false
                 } else {
-                    self.expanded_inline.insert(key.clone());
-                    true
+                    self.expanded_inline.insert(key);
                 }
             }
         };
         self.rebuild_active();
-        if !now_open {
-            self.seek_cursor(&key);
-        }
     }
 
     /// The key of the selected goals-view row. For a leaf task, returns its
@@ -661,17 +669,38 @@ impl App {
                 inline_view::InlineRowKind::Dir(k) | inline_view::InlineRowKind::File(k) => {
                     k.clone()
                 }
-                inline_view::InlineRowKind::Task { parent_key } => parent_key.clone(),
+                inline_view::InlineRowKind::Task { parent_key, .. } => parent_key.clone(),
             })
     }
 }
 
-/// The foldable key of a goals-view row, or `None` for leaves.
-fn goal_row_node_key(row: &GoalRow) -> Option<&str> {
+/// Stable identity of a goals-view row (its own key).
+fn goal_row_id(row: &GoalRow) -> String {
     match &row.kind {
-        GoalRowKind::Header { key, .. } | GoalRowKind::Milestone { key } => Some(key),
-        GoalRowKind::Task { .. } => None,
+        GoalRowKind::Header { key }
+        | GoalRowKind::Milestone { key }
+        | GoalRowKind::Task { key, .. } => key.clone(),
     }
+}
+
+/// Stable identity of an inline-view row: the dir/file key, or
+/// `{file}::{line}` for a task (unique so the cursor can track a specific task).
+fn inline_row_id(row: &InlineRow) -> String {
+    match &row.kind {
+        inline_view::InlineRowKind::Dir(k) | inline_view::InlineRowKind::File(k) => k.clone(),
+        inline_view::InlineRowKind::Task { parent_key, line } => {
+            format!("{parent_key}::{line}")
+        }
+    }
+}
+
+/// The parent identity of a row id, for re-anchoring when the row is hidden:
+/// `g0/1/2` -> `g0/1`; `src/a.rs::42` -> `src/a.rs`; `src/a.rs` -> `src`.
+fn ancestor_id(id: &str) -> Option<String> {
+    if let Some((path, _line)) = id.rsplit_once("::") {
+        return Some(path.to_string());
+    }
+    id.rsplit_once('/').map(|(parent, _)| parent.to_string())
 }
 
 /// Parse an item key `g{gi}/{c0}/{c1}/...` into the goal index and the
@@ -713,14 +742,6 @@ fn goal_item_mut<'a>(goals: &'a mut [Goal], gi: usize, path: &[usize]) -> Option
 fn goal_item_span(goals: &[Goal], gi: usize, path: &[usize]) -> Option<(PathBuf, usize)> {
     let item = goal_item_ref(goals, gi, path)?;
     Some((item.span.path.clone(), item.span.line))
-}
-
-/// The foldable key of an inline-view row, or `None` for leaves.
-fn inline_row_node_key(row: &InlineRow) -> Option<&str> {
-    match &row.kind {
-        inline_view::InlineRowKind::Dir(k) | inline_view::InlineRowKind::File(k) => Some(k),
-        inline_view::InlineRowKind::Task { .. } => None,
-    }
 }
 
 /// Count `(total_leaf, done_leaf)` beneath an item.
