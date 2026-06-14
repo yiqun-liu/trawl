@@ -84,9 +84,10 @@ pub(super) fn flatten_inline(
     root: &TreeNode,
     tasks: &[InlineTask],
     expanded: &HashSet<String>,
+    show_blame: bool,
 ) -> Vec<InlineRow> {
     let mut rows = Vec::new();
-    flatten_dir(root, "", 0, tasks, expanded, &mut rows);
+    flatten_dir(root, "", 0, tasks, expanded, show_blame, &mut rows);
     rows
 }
 
@@ -96,6 +97,7 @@ fn flatten_dir(
     depth: usize,
     tasks: &[InlineTask],
     expanded: &HashSet<String>,
+    show_blame: bool,
     rows: &mut Vec<InlineRow>,
 ) {
     let indent = "  ".repeat(depth);
@@ -114,7 +116,7 @@ fn flatten_dir(
             style: Style::default(),
         });
         if expanded.contains(&key) {
-            flatten_dir(dir, &key, depth + 1, tasks, expanded, rows);
+            flatten_dir(dir, &key, depth + 1, tasks, expanded, show_blame, rows);
         }
     }
 
@@ -143,15 +145,27 @@ fn flatten_dir(
                     .priority
                     .as_ref()
                     .map_or(String::new(), |p| format!("  [{}]", p.label()));
+                let mut text = format!(
+                    "{task_indent}L{}  {}{}  {}",
+                    task.span.line, task.keyword, scope, task.description
+                );
+                if show_blame {
+                    if let Some(author) = &task.blame_author {
+                        text.push_str(&format!("  ({author}"));
+                        if let Some(date) = &task.blame_date {
+                            text.push_str(&format!(" {})", date.format("%Y-%m-%d")));
+                        } else {
+                            text.push(')');
+                        }
+                    }
+                }
+                text.push_str(&badge);
                 rows.push(InlineRow {
                     kind: InlineRowKind::Task {
                         parent_key: key.clone(),
                         line: task.span.line,
                     },
-                    text: format!(
-                        "{task_indent}L{}  {}{}  {}{}",
-                        task.span.line, task.keyword, scope, task.description, badge
-                    ),
+                    text,
                     style: keyword_style(&task.keyword),
                 });
                 if task.is_stale(365) {
@@ -268,8 +282,9 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
         .iter()
         .filter(|t| t.is_stale(365))
         .count();
+    let blame_indicator = if app.show_blame { " blame" } else { "" };
     let title = format!(
-        "Inline Tasks  ({count})  [{sort_label}]  high:{high} med:{med} low:{low} untagged:{untagged} stale:{stale_count}"
+        "Inline Tasks  ({count})  [{sort_label}{blame_indicator}]  high:{high} med:{med} low:{low} untagged:{untagged} stale:{stale_count}"
     );
     let list = List::new(items)
         .block(Block::default().borders(Borders::ALL).title(title))
@@ -328,7 +343,7 @@ mod tests {
     fn collapsed_shows_only_top_level() {
         let tasks = vec![task("src/a.rs", 1, "TODO", None)];
         let root = build_tree(&tasks);
-        let rows = flatten_inline(&root, &tasks, &HashSet::new());
+        let rows = flatten_inline(&root, &tasks, &HashSet::new(), false);
         assert_eq!(rows.len(), 1); // just "src/"
         assert!(rows[0].text.contains("src/"));
         assert!(rows[0].text.contains("[1]"));
@@ -344,7 +359,7 @@ mod tests {
         let mut expanded = HashSet::new();
         expanded.insert("src".to_string());
         expanded.insert("src/a.rs".to_string());
-        let rows = flatten_inline(&root, &tasks, &expanded);
+        let rows = flatten_inline(&root, &tasks, &expanded, false);
         // src/ (expanded), a.rs (expanded), task@1, task@9
         assert_eq!(rows.len(), 4);
         assert!(rows[2].text.contains("L1"));

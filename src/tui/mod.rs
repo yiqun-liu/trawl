@@ -199,6 +199,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('S') => app.show_stats = true,
         KeyCode::Char('f') => app.begin_filter(),
         KeyCode::Char('s') => app.cycle_sort(),
+        KeyCode::Char('g') => app.toggle_blame(),
         KeyCode::Esc => app.clear_filter(),
         KeyCode::Char('e') => app.edit_selected(),
         KeyCode::Char(' ') => app.toggle_checkbox(),
@@ -232,7 +233,7 @@ fn draw(f: &mut Frame, app: &App) {
                 format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  S: stats  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  s: sort  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
+                "f: filter  s: sort  g: blame  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
             }
         }
     };
@@ -298,6 +299,7 @@ fn help_text(view: View) -> Vec<Line<'static>> {
         Line::from("  l / h        expand / collapse"),
         Line::from("  Enter        toggle  (on a leaf, toggles its parent)"),
         Line::from("  Space        toggle checkbox  (goals view; writes back)"),
+        Line::from("  g            toggle git blame (inline view)"),
         Line::from("  e            edit file at cursor"),
         Line::from("  Tab          switch Goals <-> Inline Tasks"),
         Line::from(""),
@@ -367,6 +369,7 @@ struct App {
     quit: bool,
     show_help: bool,
     show_stats: bool,
+    show_blame: bool,
     pending_edit: Option<(PathBuf, usize)>,
 }
 
@@ -391,7 +394,7 @@ impl App {
         let inline_displayed = inline_tasks.clone();
         let inline_root = build_tree(&inline_displayed);
         let expanded_inline = auto_expand_keys(&inline_root, &inline_displayed);
-        let inline_rows = flatten_inline(&inline_root, &inline_displayed, &expanded_inline);
+        let inline_rows = flatten_inline(&inline_root, &inline_displayed, &expanded_inline, false);
 
         Self {
             goals,
@@ -417,6 +420,7 @@ impl App {
             quit: false,
             show_help: false,
             show_stats: false,
+            show_blame: false,
             pending_edit: None,
         }
     }
@@ -572,12 +576,29 @@ impl App {
     fn cycle_sort(&mut self) {
         self.sort_mode = self.sort_mode.next();
         self.sort_inline();
-        // rebuild tree/rows from sorted inline_displayed, keep filter
         self.inline_root = build_tree(&self.inline_displayed);
         self.inline_rows = flatten_inline(
             &self.inline_root,
             &self.inline_displayed,
             &self.expanded_inline,
+            self.show_blame,
+        );
+        if !self.inline_rows.is_empty() {
+            self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
+        } else {
+            self.inline_selected = 0;
+        }
+    }
+
+    /// `g`: toggle blame annotations on inline task rows.
+    fn toggle_blame(&mut self) {
+        self.show_blame = !self.show_blame;
+        self.inline_root = build_tree(&self.inline_displayed);
+        self.inline_rows = flatten_inline(
+            &self.inline_root,
+            &self.inline_displayed,
+            &self.expanded_inline,
+            self.show_blame,
         );
         if !self.inline_rows.is_empty() {
             self.inline_selected = self.inline_selected.min(self.inline_rows.len() - 1);
@@ -587,13 +608,14 @@ impl App {
     }
 
     /// Rebuild the inline tree/rows from the currently displayed tasks. Does
-    /// not refilter; called after expand/collapse.
+    /// not refilter; called after expand/collapse/toggle.
     fn rebuild_inline_rows(&mut self) {
         self.inline_root = build_tree(&self.inline_displayed);
         self.inline_rows = flatten_inline(
             &self.inline_root,
             &self.inline_displayed,
             &self.expanded_inline,
+            self.show_blame,
         );
     }
 
