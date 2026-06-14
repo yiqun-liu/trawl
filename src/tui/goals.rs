@@ -1,8 +1,10 @@
 //! Goals view: flatten the goal forest into display rows and render it.
 //!
-//! The flattening is a pure function over [`Goal`](crate::model::Goal) data so
-//! it can be unit-tested without a terminal. Expand state is a set of goal
-//! indices; expanding re-runs the flatten.
+//! Folding is hierarchical and key-string-addressed: a goal header has key
+//! `g{idx}` and each milestone has key `g{idx}/{child_path}` (e.g. `g0/1/0`).
+//! Expanding a goal shows its top-level items; each milestone folds/unfolds
+//! independently. Flattening is a pure function over the data so it can be
+//! unit-tested without a terminal.
 
 use std::collections::HashSet;
 
@@ -10,16 +12,18 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
 
 use crate::model::{Goal, GoalItem};
 
-/// Which goal a row belongs to (headers carry the goal index; items don't).
+/// Which goal a row belongs to. Headers and milestones are foldable; tasks
+/// (leaves) are not.
 pub(super) enum GoalRowKind {
-    Header(usize),
-    Item,
+    Header { key: String },
+    Milestone { key: String },
+    Task,
 }
 
 pub(super) struct GoalRow {
@@ -27,66 +31,93 @@ pub(super) struct GoalRow {
     pub(super) text: String,
 }
 
-/// Flatten goals into display rows. Expanded goals expose their item tree.
-pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<usize>) -> Vec<GoalRow> {
+/// Flatten goals into display rows according to the expand set.
+pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<GoalRow> {
     let mut rows = Vec::new();
     for (gi, goal) in goals.iter().enumerate() {
-        let marker = if expanded.contains(&gi) { '▼' } else { '▸' };
+        let key = format!("g{gi}");
+        let marker = if expanded.contains(&key) {
+            '▼'
+        } else {
+            '▸'
+        };
         let pct = (goal.progress() * 100.0).round() as u32;
         rows.push(GoalRow {
-            kind: GoalRowKind::Header(gi),
+            kind: GoalRowKind::Header { key: key.clone() },
             text: format!("{marker} {}  {}  {}%", goal.title, goal.badge, pct),
         });
-        if expanded.contains(&gi) {
-            for item in &goal.items {
-                push_item(item, 1, &mut rows);
+        if expanded.contains(&key) {
+            for (ci, item) in goal.items.iter().enumerate() {
+                push_item(item, &format!("{key}/{ci}"), 1, expanded, &mut rows);
             }
         }
     }
     rows
 }
 
-fn push_item(item: &GoalItem, depth: usize, rows: &mut Vec<GoalRow>) {
-    let check = if item.checked { 'x' } else { ' ' };
+fn push_item(
+    item: &GoalItem,
+    key: &str,
+    depth: usize,
+    expanded: &HashSet<String>,
+    rows: &mut Vec<GoalRow>,
+) {
     let indent = "  ".repeat(depth);
-    rows.push(GoalRow {
-        kind: GoalRowKind::Item,
-        text: format!("{indent}[{check}] {}", item.text),
-    });
-    for child in &item.children {
-        push_item(child, depth + 1, rows);
+    let check = if item.checked { 'x' } else { ' ' };
+
+    if item.children.is_empty() {
+        // Leaf task: not foldable.
+        rows.push(GoalRow {
+            kind: GoalRowKind::Task,
+            text: format!("{indent}[{check}] {}", item.text),
+        });
+    } else {
+        // Milestone: foldable.
+        let marker = if expanded.contains(key) { '▼' } else { '▸' };
+        rows.push(GoalRow {
+            kind: GoalRowKind::Milestone {
+                key: key.to_string(),
+            },
+            text: format!("{indent}{marker} [{check}] {}", item.text),
+        });
+        if expanded.contains(key) {
+            for (ci, child) in item.children.iter().enumerate() {
+                push_item(child, &format!("{key}/{ci}"), depth + 1, expanded, rows);
+            }
+        }
     }
 }
 
-/// Render the goals view.
+/// Render the goals view. Uses a stateful list so the viewport scrolls to
+/// follow the cursor, with the selection shown via the highlight style.
 pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
-    let selected = app.goal_selected;
     let items: Vec<ListItem> = app
         .goal_rows
         .iter()
-        .enumerate()
-        .map(|(i, row)| {
-            let line = Line::from(row.text.clone());
-            if i == selected {
-                ListItem::new(line.style(Style::default().add_modifier(Modifier::REVERSED)))
-            } else {
-                ListItem::new(line)
-            }
-        })
+        .map(|row| ListItem::new(Line::from(row.text.clone())))
         .collect();
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Goals & Milestones"),
-    );
-    f.render_widget(list, area);
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Goals & Milestones"),
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    let mut state = ListState::default();
+    if app.goal_rows.is_empty() {
+        state.select(None);
+    } else {
+        state.select(Some(app.goal_selected));
+    }
+    f.render_stateful_widget(list, area, &mut state);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Metadata, Span, Status};
+    use crate::model::{Metadata, Span};
     use std::path::PathBuf;
 
     fn goal(title: &str, items: Vec<GoalItem>) -> Goal {
@@ -137,7 +168,7 @@ mod tests {
     }
 
     #[test]
-    fn expanded_exposes_nested_items() {
+    fn expanding_a_goal_shows_top_level_milestones_folded() {
         let goals = vec![goal(
             "A",
             vec![milestone(
@@ -147,15 +178,53 @@ mod tests {
             )],
         )];
         let mut expanded = HashSet::new();
-        expanded.insert(0);
+        expanded.insert("g0".to_string());
+        let rows = flatten_goals(&goals, &expanded);
+        // header + milestone only (milestone's children stay folded)
+        assert_eq!(rows.len(), 2);
+        assert!(rows[1].text.contains("▸ [ ] week 1"));
+    }
+
+    #[test]
+    fn expanding_a_milestone_reveals_its_tasks() {
+        let goals = vec![goal(
+            "A",
+            vec![milestone(
+                "week 1",
+                false,
+                vec![leaf("task 1", true), leaf("task 2", false)],
+            )],
+        )];
+        let mut expanded = HashSet::new();
+        expanded.insert("g0".to_string());
+        expanded.insert("g0/0".to_string());
         let rows = flatten_goals(&goals, &expanded);
         assert_eq!(rows.len(), 4); // header + milestone + 2 tasks
-        assert!(rows[0].text.starts_with("▼ A"));
-        assert!(rows[1].text.contains("[ ] week 1"));
+        assert!(rows[1].text.starts_with("  ▼ [ ] week 1"));
         assert!(rows[2].text.contains("[x] task 1"));
         assert!(rows[3].text.contains("[ ] task 2"));
-        // indentation increases with depth
+        // tasks are indented one level deeper than the milestone
         assert!(rows[3].text.starts_with("    "));
+    }
+
+    #[test]
+    fn milestone_keys_are_nested_paths() {
+        let goals = vec![goal(
+            "A",
+            vec![milestone(
+                "week 1",
+                false,
+                vec![milestone("sub", false, vec![leaf("deep", false)])],
+            )],
+        )];
+        let mut expanded = HashSet::new();
+        expanded.insert("g0".to_string());
+        expanded.insert("g0/0".to_string());
+        let rows = flatten_goals(&goals, &expanded);
+        // header + week1 + sub (folded); "deep" stays hidden under "sub"
+        assert_eq!(rows.len(), 3);
+        assert!(matches!(rows[2].kind, GoalRowKind::Milestone { .. }));
+        assert!(rows[2].text.contains("▸ [ ] sub"));
     }
 
     #[test]
@@ -164,6 +233,5 @@ mod tests {
         let rows = flatten_goals(&goals, &HashSet::new());
         assert!(rows[0].text.contains("100%"));
         assert!(rows[0].text.contains("(root)"));
-        let _ = Status::Active; // keep the import meaningful
     }
 }

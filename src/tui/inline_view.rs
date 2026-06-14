@@ -11,7 +11,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
 
@@ -178,26 +178,26 @@ fn join_key(prefix: &str, name: &str) -> String {
     }
 }
 
-/// Render the inline tasks view.
+/// Render the inline tasks view. Stateful so the viewport follows the cursor.
 pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
-    let selected = app.inline_selected;
     let items: Vec<ListItem> = app
         .inline_rows
         .iter()
-        .enumerate()
-        .map(|(i, row)| {
-            let line = Line::from(row.text.clone());
-            if i == selected {
-                ListItem::new(line.style(Style::default().add_modifier(Modifier::REVERSED)))
-            } else {
-                ListItem::new(line)
-            }
-        })
+        .map(|row| ListItem::new(Line::from(row.text.clone())))
         .collect();
 
     let title = format!("Inline Tasks  ({})", app.inline_tasks.len());
-    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(title));
-    f.render_widget(list, area);
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    let mut state = ListState::default();
+    if app.inline_rows.is_empty() {
+        state.select(None);
+    } else {
+        state.select(Some(app.inline_selected));
+    }
+    f.render_stateful_widget(list, area, &mut state);
 }
 
 #[cfg(test)]

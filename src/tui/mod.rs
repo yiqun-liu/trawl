@@ -30,7 +30,7 @@ use crate::ScanResult;
 mod goals;
 mod inline_view;
 
-use goals::{flatten_goals, GoalRow};
+use goals::{flatten_goals, GoalRow, GoalRowKind};
 use inline_view::{auto_expand_keys, build_tree, flatten_inline, InlineRow, TreeNode};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -101,7 +101,8 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Tab => app.toggle_view(),
         KeyCode::Char('j') | KeyCode::Down => app.move_cursor(1),
         KeyCode::Char('k') | KeyCode::Up => app.move_cursor(-1),
-        KeyCode::Char('l') | KeyCode::Enter => app.expand_selected(),
+        KeyCode::Char('l') => app.expand_selected(),
+        KeyCode::Enter => app.toggle_selected(),
         KeyCode::Char('h') | KeyCode::Backspace => app.collapse_selected(),
         _ => {}
     }
@@ -120,7 +121,9 @@ fn draw(f: &mut Frame, app: &App) {
     }
 
     let hint = match app.view {
-        View::Goals => "Enter/l: expand  h: collapse  j/k: move  Tab: Inline Tasks  q: quit",
+        View::Goals => {
+            "Enter: toggle  l: expand  h: collapse  j/k: move  Tab: Inline Tasks  q: quit"
+        }
         View::Inline => "Tab: Goals  q: quit",
     };
     let footer_widget =
@@ -135,7 +138,7 @@ struct App {
     view: View,
     goal_rows: Vec<GoalRow>,
     goal_selected: usize,
-    expanded_goals: HashSet<usize>,
+    goal_expanded: HashSet<String>,
     inline_root: TreeNode,
     inline_rows: Vec<InlineRow>,
     inline_selected: usize,
@@ -145,8 +148,8 @@ struct App {
 
 impl App {
     fn new(goals: Vec<Goal>, inline_tasks: Vec<InlineTask>) -> Self {
-        let expanded_goals = HashSet::new();
-        let goal_rows = flatten_goals(&goals, &expanded_goals);
+        let goal_expanded = HashSet::new();
+        let goal_rows = flatten_goals(&goals, &goal_expanded);
 
         let inline_root = build_tree(&inline_tasks);
         let expanded_inline = auto_expand_keys(&inline_root, &inline_tasks);
@@ -158,7 +161,7 @@ impl App {
             view: View::Goals,
             goal_rows,
             goal_selected: 0,
-            expanded_goals,
+            goal_expanded,
             inline_root,
             inline_rows,
             inline_selected: 0,
@@ -196,9 +199,9 @@ impl App {
     fn expand_selected(&mut self) {
         match self.view {
             View::Goals => {
-                if let Some(gi) = self.selected_goal_header() {
-                    if self.expanded_goals.insert(gi) {
-                        self.goal_rows = flatten_goals(&self.goals, &self.expanded_goals);
+                if let Some(key) = self.selected_goal_key() {
+                    if self.goal_expanded.insert(key) {
+                        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
                     }
                 }
             }
@@ -219,9 +222,9 @@ impl App {
     fn collapse_selected(&mut self) {
         match self.view {
             View::Goals => {
-                if let Some(gi) = self.selected_goal_header() {
-                    if self.expanded_goals.remove(&gi) {
-                        self.goal_rows = flatten_goals(&self.goals, &self.expanded_goals);
+                if let Some(key) = self.selected_goal_key() {
+                    if self.goal_expanded.remove(&key) {
+                        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
                     }
                 }
             }
@@ -239,13 +242,46 @@ impl App {
         }
     }
 
-    /// If the selected goals-view row is a goal header, return its goal index.
-    fn selected_goal_header(&self) -> Option<usize> {
+    /// Enter: toggle the selected foldable node (fold ↔ unfold).
+    fn toggle_selected(&mut self) {
+        match self.view {
+            View::Goals => {
+                if let Some(key) = self.selected_goal_key() {
+                    if self.goal_expanded.contains(&key) {
+                        self.goal_expanded.remove(&key);
+                    } else {
+                        self.goal_expanded.insert(key);
+                    }
+                    self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
+                }
+            }
+            View::Inline => {
+                if let Some(key) = self.selected_inline_key() {
+                    if self.expanded_inline.contains(&key) {
+                        self.expanded_inline.remove(&key);
+                    } else {
+                        self.expanded_inline.insert(key);
+                    }
+                    self.inline_rows = flatten_inline(
+                        &self.inline_root,
+                        &self.inline_tasks,
+                        &self.expanded_inline,
+                    );
+                }
+            }
+        }
+    }
+
+    /// If the selected goals-view row is foldable (header or milestone),
+    /// return its key.
+    fn selected_goal_key(&self) -> Option<String> {
         self.goal_rows
             .get(self.goal_selected)
-            .and_then(|row| match row.kind {
-                goals::GoalRowKind::Header(gi) => Some(gi),
-                goals::GoalRowKind::Item => None,
+            .and_then(|row| match &row.kind {
+                GoalRowKind::Header { key, .. } | GoalRowKind::Milestone { key } => {
+                    Some(key.clone())
+                }
+                GoalRowKind::Task => None,
             })
     }
 
