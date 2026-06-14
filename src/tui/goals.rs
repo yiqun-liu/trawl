@@ -56,7 +56,13 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
         let completed = goal.status() == Status::Completed;
         rows.push(GoalRow {
             kind: GoalRowKind::Header { key: key.clone() },
-            text: format!("{marker} {}  {}  {}%", goal.title, goal.badge, pct),
+            text: format!(
+                "{marker} {}  {}  [{}] {}%",
+                goal.title,
+                goal.badge,
+                progress_bar(pct),
+                pct
+            ),
             style: if completed {
                 Style::default().add_modifier(Modifier::DIM | Modifier::CROSSED_OUT)
             } else {
@@ -70,6 +76,13 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
         }
     }
     rows
+}
+
+/// A text-based progress bar: `[=====     ]` for 50%.
+fn progress_bar(pct: u32) -> String {
+    const W: usize = 10;
+    let filled = ((pct as f64 / 100.0) * W as f64).round() as usize;
+    format!("{}{}", "=".repeat(filled), "-".repeat(W - filled))
 }
 
 /// Every foldable node key in the goal forest (goals + milestones), for
@@ -163,13 +176,16 @@ fn push_item(
             style,
         });
     } else {
-        // Milestone: foldable.
+        // Milestone: foldable.  Append direct-children ratio.
+        let checked_children = item.children.iter().filter(|c| c.checked).count();
+        let total_children = item.children.len();
+        let ratio = format!("  {checked_children}/{total_children}");
         let marker = if expanded.contains(key) { '▼' } else { '▸' };
         rows.push(GoalRow {
             kind: GoalRowKind::Milestone {
                 key: key.to_string(),
             },
-            text: format!("{indent}{marker} [{check}] {}{badge}", item.text),
+            text: format!("{indent}{marker} [{check}] {}{badge}{ratio}", item.text),
             style,
         });
         if expanded.contains(key) {
