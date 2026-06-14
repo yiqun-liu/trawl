@@ -67,31 +67,31 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Implement derived fields (title from H1, status from progress)
   - [x] Implement location badge derivation (super directory path)
   - [x] Add test fixtures for checkbox trees, tables, mixed format, edge cases
-- [ ] TUI Framework
-  - [ ] Initialize ratatui terminal with crossterm backend
-  - [ ] Implement event loop (keyboard input via crossterm events)
-  - [ ] Implement Tab-based view switching (Goals and Inline Tasks)
-  - [ ] Implement app state struct (current view, filter state, sort mode)
-  - [ ] Implement clean terminal restoration on exit / panic
+- [x] TUI Framework
+  - [x] Initialize ratatui terminal with crossterm backend
+  - [x] Implement event loop (keyboard input via crossterm events)
+  - [x] Implement Tab-based view switching (Goals and Inline Tasks)
+  - [x] Implement app state struct (current view, filter state, sort mode)
+  - [x] Implement clean terminal restoration on exit / panic
 - [ ] TUI Goals View
-  - [ ] Render goal list (title, location badge, progress %)
+  - [x] Render goal list (title, location badge, progress %)
   - [ ] Render progress bars for each goal
-  - [ ] Implement inline expand/collapse of checkbox tree
+  - [x] Implement inline expand/collapse of checkbox tree
   - [ ] Render milestone per-group ratios (e.g., `2/3`)
   - [ ] Render task metadata (priority badge, owner, tags)
-- [ ] TUI Inline Tasks View
-  - [ ] Build directory tree structure from scan results
-  - [ ] Render foldable tree nodes (directories, files, tasks)
-  - [ ] Display item counts `[N]` next to each dir/file node
-  - [ ] Render task details (line number, keyword, description)
-  - [ ] Implement auto-expand for directories containing high-priority tasks
+- [x] TUI Inline Tasks View
+  - [x] Build directory tree structure from scan results
+  - [x] Render foldable tree nodes (directories, files, tasks)
+  - [x] Display item counts `[N]` next to each dir/file node
+  - [x] Render task details (line number, keyword, description)
+  - [x] Implement auto-expand for directories containing high-priority tasks
 - [ ] Keyboard Navigation
-  - [ ] `j`/`k` — move down/up
-  - [ ] `l`/`h` — expand/collapse (vim-style)
-  - [ ] `Enter` — toggle expand (inline context for tasks)
+  - [x] `j`/`k` — move down/up
+  - [x] `l`/`h` — expand/collapse (vim-style)
+  - [x] `Enter` — toggle expand (inline context for tasks)
   - [ ] `Space` — toggle checkbox (in goals view)
-  - [ ] `Tab` — switch Goals and Inline Tasks
-  - [ ] `q` — quit
+  - [x] `Tab` — switch Goals and Inline Tasks
+  - [x] `q` — quit
 
 ### Phase 2 — Interaction
 
