@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveDateTime};
 
 /// A priority level parsed from a `!` token.
 ///
@@ -89,6 +89,11 @@ pub struct InlineTask {
     pub description: String,
     pub metadata: Metadata,
     pub span: Span,
+    /// Populated by blame enrichment (git2) when `display.show_git_blame`
+    /// is true. `None` when blame is disabled or data is unavailable.
+    pub blame_author: Option<String>,
+    pub blame_date: Option<NaiveDateTime>,
+    pub blame_commit: Option<String>,
 }
 
 /// One checkbox node or one table row in a goal tracker.

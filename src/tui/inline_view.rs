@@ -293,6 +293,9 @@ mod tests {
                 path: PathBuf::from(path),
                 line,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         }
     }
 

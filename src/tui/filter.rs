@@ -121,6 +121,9 @@ mod tests {
                 path: PathBuf::from(path),
                 line: 1,
             },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
         }
     }
 

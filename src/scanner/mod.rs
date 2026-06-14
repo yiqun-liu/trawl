@@ -37,6 +37,8 @@ pub struct ScanOptions {
     pub max_bytes: u64,
     /// When true, files not tracked by git are skipped.
     pub only_tracked: bool,
+    /// When true, enrich inline tasks with git blame data.
+    pub show_git_blame: bool,
 }
 
 impl ScanOptions {
@@ -48,6 +50,7 @@ impl ScanOptions {
         scan_hidden: bool,
         max_bytes: u64,
         only_tracked: bool,
+        show_git_blame: bool,
     ) -> Result<Self> {
         Ok(Self {
             root,
@@ -56,6 +59,7 @@ impl ScanOptions {
             scan_hidden,
             max_bytes,
             only_tracked,
+            show_git_blame,
         })
     }
 
@@ -68,6 +72,7 @@ impl ScanOptions {
             config.scan.scan_hidden,
             config.scan.max_bytes().unwrap_or(u64::MAX),
             config.scan.only_tracked,
+            config.display.show_git_blame,
         )
     }
 }

@@ -12,11 +12,12 @@ toml = "0.8"
 anyhow = "1"
 log = "0.4"
 env_logger = "0.11"
-chrono = { version = "0.4", default-features = false }
+chrono = "0.4"
 ignore = "0.4"
 rayon = "1"
 globset = "0.4"
 regex = "1"
+git2 = "0.19"
 ratatui = "0.29"
 crossterm = "0.28"
 

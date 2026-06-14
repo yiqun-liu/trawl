@@ -4,6 +4,7 @@
 //! integration tests can drive it independently of the CLI. The binary
 //! entry point lives in `main.rs`.
 
+pub mod blame;
 pub mod config;
 pub mod metadata;
 pub mod model;
@@ -41,6 +42,9 @@ pub fn scan(options: &ScanOptions, ctx: &ParseContext) -> Result<ScanResult> {
                 goals.push(goal);
             }
         }
+    }
+    if options.show_git_blame {
+        let _ = blame::enrich_tasks(root, &mut inline_tasks);
     }
     Ok(ScanResult {
         goals,

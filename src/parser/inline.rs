@@ -55,6 +55,9 @@ pub fn parse_line(
             path: path.to_path_buf(),
             line: lineno,
         },
+        blame_author: None,
+        blame_date: None,
+        blame_commit: None,
     })
 }
 
