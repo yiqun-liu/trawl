@@ -44,6 +44,7 @@ pub struct ScanConfig {
     pub exclude: Vec<String>,
     pub max_file_size: String,
     pub scan_hidden: bool,
+    pub only_tracked: bool,
 }
 
 impl ScanConfig {
@@ -82,6 +83,7 @@ impl Default for Config {
                 exclude: Vec::new(),
                 max_file_size: "1MB".into(),
                 scan_hidden: false,
+                only_tracked: true,
             },
             tokens: default_tokens(),
             headers: default_headers(),
@@ -212,6 +214,9 @@ impl Config {
             if let Some(v) = scan.scan_hidden {
                 self.scan.scan_hidden = v;
             }
+            if let Some(v) = scan.only_tracked {
+                self.scan.only_tracked = v;
+            }
         }
         if let Some(tokens) = file.tokens {
             for (k, v) in tokens {
@@ -273,6 +278,8 @@ struct ScanFile {
     max_file_size: Option<String>,
     #[serde(default)]
     scan_hidden: Option<bool>,
+    #[serde(default)]
+    only_tracked: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]

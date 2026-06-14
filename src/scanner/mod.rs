@@ -35,6 +35,8 @@ pub struct ScanOptions {
     pub scan_hidden: bool,
     /// Files larger than this (in bytes) are skipped.
     pub max_bytes: u64,
+    /// When true, files not tracked by git are skipped.
+    pub only_tracked: bool,
 }
 
 impl ScanOptions {
@@ -45,6 +47,7 @@ impl ScanOptions {
         include: &[String],
         scan_hidden: bool,
         max_bytes: u64,
+        only_tracked: bool,
     ) -> Result<Self> {
         Ok(Self {
             root,
@@ -52,18 +55,19 @@ impl ScanOptions {
             include: compile_patterns(include)?,
             scan_hidden,
             max_bytes,
+            only_tracked,
         })
     }
 
     /// Build options from resolved [`Config`].
     pub fn from_config(root: PathBuf, config: &Config) -> Result<Self> {
-        let max_bytes = config.scan.max_bytes().unwrap_or(u64::MAX);
         Self::new(
             root,
             &config.scan.exclude,
             &config.scan.include,
             config.scan.scan_hidden,
-            max_bytes,
+            config.scan.max_bytes().unwrap_or(u64::MAX),
+            config.scan.only_tracked,
         )
     }
 }

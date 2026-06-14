@@ -1,6 +1,8 @@
 //! Directory walking with the six-stage filter pipeline.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use ignore::{DirEntry, WalkBuilder};
 
@@ -10,18 +12,48 @@ use super::ScanOptions;
 /// pipeline. Errors for individual entries are logged and skipped; the walk
 /// never aborts for a single bad entry.
 pub(super) fn walk(options: &ScanOptions) -> Vec<PathBuf> {
+    // Stage 2: restrict to files tracked by git when `only_tracked` is true.
+    let tracked: Option<HashSet<String>> = if options.only_tracked {
+        let out = Command::new("git")
+            .args([
+                "-C",
+                &options.root.to_string_lossy(),
+                "ls-files",
+                "--cached",
+            ])
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(o.stdout)
+                } else {
+                    None
+                }
+            });
+        // If git isn't available or this isn't a git repo, allow all files.
+        out.map(|bytes| {
+            String::from_utf8_lossy(&bytes)
+                .lines()
+                .map(|s| s.to_string())
+                .collect()
+        })
+    } else {
+        None
+    };
+
     let mut builder = WalkBuilder::new(&options.root);
     // Stage 1: .gitignore-aware via standard filters (git_ignore, parents, …).
     builder.standard_filters(true);
-    // Stage 4: hidden files/dirs.
+    // Stage 5: hidden files/dirs.
     builder.hidden(!options.scan_hidden);
 
     let exclude = options.exclude.clone();
     let include = options.include.clone();
     let root = options.root.clone();
     let max_bytes = options.max_bytes;
-    // Stages 2, 3, 5: exclude / include / max_file_size.
-    builder.filter_entry(move |entry| accept(entry, &root, &exclude, &include, max_bytes));
+    // Stages 3, 4, 6, 7: exclude / include / max_file_size / (tracked via closure).
+    builder
+        .filter_entry(move |entry| accept(entry, &root, &exclude, &include, max_bytes, &tracked));
 
     let mut out = Vec::new();
     for result in builder.build() {
@@ -46,6 +78,7 @@ fn accept(
     exclude: &Option<globset::GlobSet>,
     include: &Option<globset::GlobSet>,
     max_bytes: u64,
+    tracked: &Option<HashSet<String>>,
 ) -> bool {
     // Always keep the root itself so the walk begins.
     if entry.depth() == 0 {
@@ -56,6 +89,14 @@ fn accept(
         return true;
     };
     let rel_str = rel.to_string_lossy().replace('\\', "/");
+
+    // Stage 2: untracked-filter — skip files not tracked by git.
+    if let Some(set) = tracked {
+        // The root depth 0 entry is always kept; for any deeper entry, check.
+        if !set.contains(&rel_str) {
+            return false;
+        }
+    }
 
     if let Some(set) = exclude {
         if set.is_match(&rel_str) {

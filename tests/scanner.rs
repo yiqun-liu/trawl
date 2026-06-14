@@ -35,6 +35,7 @@ fn walks_filters_and_skips_binary() {
         &[],
         false,
         u64::MAX,
+        false,
     )
     .unwrap();
 
@@ -68,6 +69,7 @@ fn include_whitelist_restricts_files() {
         &["*.md".to_string()],
         false,
         u64::MAX,
+        false,
     )
     .unwrap();
     let got = names(&collect_files(&opts).unwrap());
@@ -81,7 +83,7 @@ fn max_file_size_skips_large_files() {
     fs::write(root.join("small.txt"), "hi\n").unwrap();
     fs::write(root.join("big.txt"), "x".repeat(2048)).unwrap();
 
-    let opts = ScanOptions::new(root.to_path_buf(), &[], &[], false, 1024).unwrap();
+    let opts = ScanOptions::new(root.to_path_buf(), &[], &[], false, 1024, false).unwrap();
     let got = names(&collect_files(&opts).unwrap());
     assert!(got.contains(&"small.txt".to_string()));
     assert!(!got.contains(&"big.txt".to_string()));
