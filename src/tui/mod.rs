@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Stdout};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -97,6 +97,16 @@ fn run_loop(terminal: &mut Tui, app: &mut App) -> Result<()> {
             continue;
         }
         handle_key(app, key);
+
+        if let Some((rel, line)) = app.pending_edit.take() {
+            let abs = app.root.join(&rel);
+            disable_raw_mode()?;
+            execute!(io::stdout(), LeaveAlternateScreen)?;
+
+            let _ = editor_command(&abs, line).status();
+
+            *terminal = setup_terminal()?;
+        }
     }
     Ok(())
 }
@@ -161,6 +171,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('X') => app.expand_all(),
         KeyCode::Char('f') => app.begin_filter(),
         KeyCode::Esc => app.clear_filter(),
+        KeyCode::Char('e') => app.edit_selected(),
         KeyCode::Char(' ') => app.toggle_checkbox(),
         KeyCode::Char('?') => app.show_help = true,
         _ => {}
@@ -186,13 +197,13 @@ fn draw(f: &mut Frame, app: &App) {
     } else {
         match app.view {
             View::Goals => {
-                "Enter: toggle  l: expand  h: collapse  Space: toggle box  C: done  Z: all  X: expand all  j/k  Tab  q".to_string()
+                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  C: done  Z: all  X: expand all  j/k  Tab  q".to_string()
             }
             View::Inline if app.filter.is_some() => {
-                format!("filter: \"{}\"  f: edit  Esc: clear  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
+                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  Enter: toggle  l/h: fold  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
+                "f: filter  Enter: toggle  l/h: fold  e: edit  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
             }
         }
     };
@@ -242,6 +253,7 @@ fn help_text(view: View) -> Vec<Line<'static>> {
         Line::from("  l / h        expand / collapse"),
         Line::from("  Enter        toggle  (on a leaf, toggles its parent)"),
         Line::from("  Space        toggle checkbox  (goals view; writes back)"),
+        Line::from("  e            edit file at cursor"),
         Line::from("  Tab          switch Goals <-> Inline Tasks"),
         Line::from(""),
         Line::from("Goals & Milestones"),
@@ -308,6 +320,7 @@ struct App {
     expanded_inline: HashSet<String>,
     quit: bool,
     show_help: bool,
+    pending_edit: Option<(PathBuf, usize)>,
 }
 
 /// In-flight table-cell edit: which goal item, which source line, which column.
@@ -355,6 +368,7 @@ impl App {
             expanded_inline,
             quit: false,
             show_help: false,
+            pending_edit: None,
         }
     }
 
@@ -577,6 +591,70 @@ impl App {
             item.checked = crate::parser::goal::done_heuristic(&new_value);
         }
         self.rebuild_active();
+    }
+
+    /// `e`: suspend the TUI, open the editor at the selected item's file and
+    /// line, then resume. Resolution is delegated to the event loop.
+    #[allow(clippy::bind_instead_of_map)]
+    fn edit_selected(&mut self) {
+        // Goals view: the selected item's span, or the goal's source file.
+        let (rel, line) = match self.view {
+            View::Goals => {
+                if let Some(item_key) = self.selected_goal_item_key() {
+                    if let Some((rel, line)) = parse_item_key(&item_key)
+                        .and_then(|(gi, path)| goal_item_span(&self.goals, gi, &path))
+                    {
+                        (rel, line)
+                    } else {
+                        return;
+                    }
+                } else {
+                    // Goal header: open its source file at line 1.
+                    let Some(gi) =
+                        self.goal_rows
+                            .get(self.goal_selected)
+                            .and_then(|r| match &r.kind {
+                                GoalRowKind::Header { key, .. } => {
+                                    key.strip_prefix('g').and_then(|s| s.parse::<usize>().ok())
+                                }
+                                _ => None,
+                            })
+                    else {
+                        return;
+                    };
+                    let goal = &self.goals[gi];
+                    (goal.source_file.clone(), 1)
+                }
+            }
+            View::Inline => {
+                let path = self
+                    .inline_rows
+                    .get(self.inline_selected)
+                    .and_then(|r| match &r.kind {
+                        inline_view::InlineRowKind::Dir(k)
+                        | inline_view::InlineRowKind::File(k) => Some(k.clone()),
+                        inline_view::InlineRowKind::Task { parent_key, line } => {
+                            Some(format!("{parent_key}::{line}"))
+                        }
+                    });
+                let Some(path) = path else {
+                    return;
+                };
+
+                let line = if let Some((_, l)) = path.rsplit_once("::") {
+                    l.parse::<usize>().unwrap_or(1)
+                } else {
+                    1
+                };
+                let rel_path = if let Some((p, _)) = path.rsplit_once("::") {
+                    PathBuf::from(p)
+                } else {
+                    PathBuf::from(path)
+                };
+                (rel_path, line)
+            }
+        };
+        self.pending_edit = Some((rel, line));
     }
 
     /// The key of the selected row in the active view. For a leaf, this is
@@ -904,6 +982,42 @@ fn collect_done_keys(
     }
     for (ci, child) in item.children.iter().enumerate() {
         collect_done_keys(child, &format!("{key}/{ci}"), expanded, out);
+    }
+}
+
+/// Suspend and open an editor at `abs`:`line`. Resolves `$EDITOR` /
+/// `$VISUAL`; falls back to `vi` (Unix) or `notepad` (Windows). On
+/// non-Windows platforms `+{line}` is passed so the editor jumps to the
+/// right spot.
+fn editor_command(abs: &Path, _line: usize) -> std::process::Command {
+    let editor = resolve_editor();
+    let mut cmd = std::process::Command::new(&editor);
+    #[cfg(not(windows))]
+    {
+        cmd.arg(format!("+{_line}"));
+    }
+    cmd.arg(abs);
+    cmd
+}
+
+fn resolve_editor() -> String {
+    if let Ok(e) = std::env::var("EDITOR") {
+        if !e.is_empty() {
+            return e;
+        }
+    }
+    if let Ok(e) = std::env::var("VISUAL") {
+        if !e.is_empty() {
+            return e;
+        }
+    }
+    #[cfg(windows)]
+    {
+        "notepad".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        "vi".to_string()
     }
 }
 
