@@ -57,15 +57,16 @@ enum SortMode {
     Path,
     Priority,
     Keyword,
+    Age,
 }
 
 impl SortMode {
-    /// Cycle to the next active mode (excludes `Age` until Phase 3).
     fn next(self) -> Self {
         match self {
             SortMode::Path => SortMode::Priority,
             SortMode::Priority => SortMode::Keyword,
-            SortMode::Keyword => SortMode::Path,
+            SortMode::Keyword => SortMode::Age,
+            SortMode::Age => SortMode::Path,
         }
     }
 }
@@ -494,12 +495,22 @@ impl App {
                 None => prio[4] += 1,
             }
         }
+        let total: usize = prio.iter().sum();
+        let max_prio = prio.iter().max().copied().unwrap_or(1);
         lines.push(Line::from(""));
         lines.push(Line::from("Priority"));
-        lines.push(Line::from(format!(
-            "  high:{}  med:{}  low:{}  other:{}  untagged:{}",
-            prio[0], prio[1], prio[2], prio[3], prio[4]
-        )));
+        let labels = ["high", "med", "low", "other", "untagged"];
+        for (i, label) in labels.iter().enumerate() {
+            let bar = if total == 0 {
+                "[--------]".to_string()
+            } else {
+                let filled = (prio[i] as f64 / max_prio as f64 * 8.0).round() as usize;
+                let filled = filled.min(8);
+                format!("[{}{}]", "=".repeat(filled), "-".repeat(8 - filled))
+            };
+            lines.push(Line::from(format!("  {bar}  {label}:{}", prio[i])));
+        }
+        lines.push(Line::from(format!("  total:{total}")));
 
         let mut kw: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
         for t in &self.inline_tasks {
@@ -588,6 +599,16 @@ impl App {
                     _ => 4,
                 };
                 (kw, t.span.path.clone(), t.span.line)
+            }),
+            SortMode::Age => self.inline_displayed.sort_by(|a, b| {
+                // Tasks with blame data sorted by date (oldest first);
+                // tasks without blame data go to the end.
+                match (&a.blame_date, &b.blame_date) {
+                    (Some(a_date), Some(b_date)) => a_date.cmp(b_date),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => a.span.path.cmp(&b.span.path),
+                }
             }),
         }
     }

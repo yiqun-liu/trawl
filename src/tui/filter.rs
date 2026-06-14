@@ -14,6 +14,7 @@ pub(super) struct Filter {
     owner: Option<String>,
     priority: Option<Priority>,
     path: Option<String>,
+    path_glob: Option<globset::GlobSet>,
     text: Option<String>,
     stale: Option<bool>,
 }
@@ -31,7 +32,15 @@ impl Filter {
                     "tag" => f.tag = Some(value),
                     "owner" => f.owner = Some(value),
                     "pri" | "priority" => f.priority = Some(Priority::parse(&value)),
-                    "path" => f.path = Some(value),
+                    "path" => {
+                        f.path = Some(value.clone());
+                        // Compile as glob; fall back to substring on failure.
+                        if let Ok(glob) = globset::Glob::new(&value) {
+                            if let Ok(set) = globset::GlobSetBuilder::new().add(glob).build() {
+                                f.path_glob = Some(set);
+                            }
+                        }
+                    }
                     "stale" => f.stale = Some(value.eq_ignore_ascii_case("yes")),
                     // Unknown field: ignore the token.
                     _ => {}
@@ -91,7 +100,16 @@ impl Filter {
         }
         if let Some(path) = &self.path {
             let p = task.span.path.to_string_lossy().to_ascii_lowercase();
-            if !p.contains(&path.to_ascii_lowercase()) {
+            let pat = path.to_ascii_lowercase();
+            let has_wildcard = pat.contains('*') || pat.contains('?') || pat.contains('[');
+            let matched = if has_wildcard {
+                // Use glob matching for patterns with wildcards.
+                self.path_glob.as_ref().is_some_and(|g| g.is_match(&p))
+            } else {
+                // Plain string: fall back to substring match (backward compat).
+                p.contains(&pat)
+            };
+            if !matched {
                 return false;
             }
         }

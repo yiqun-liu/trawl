@@ -334,6 +334,7 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
         super::SortMode::Path => "path",
         super::SortMode::Priority => "priority",
         super::SortMode::Keyword => "keyword",
+        super::SortMode::Age => "age",
     };
     let stale_count = app
         .inline_displayed

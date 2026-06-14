@@ -183,11 +183,21 @@ fn push_item(
     let indent = "  ".repeat(depth);
     let check = if item.checked { 'x' } else { ' ' };
     let style = item_style(item);
-    let badge = item
-        .metadata
-        .priority
-        .as_ref()
-        .map_or(String::new(), |p| format!("  [{}]", p.label()));
+    let mut badges: Vec<String> = Vec::new();
+    if let Some(p) = &item.metadata.priority {
+        badges.push(format!("[{}]", p.label()));
+    }
+    if let Some(o) = &item.metadata.owner {
+        badges.push(format!("@{}", o));
+    }
+    for t in &item.metadata.tags {
+        badges.push(format!("#{}", t));
+    }
+    let badge = if badges.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", badges.join(" "))
+    };
     let blame_info = if show_blame {
         match &item.blame_author {
             Some(a) => {
