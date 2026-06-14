@@ -146,6 +146,15 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         return;
     }
 
+    if app.show_stats {
+        match key.code {
+            KeyCode::Char('S') | KeyCode::Esc => app.show_stats = false,
+            KeyCode::Char('q') | KeyCode::Char('Q') => app.quit = true,
+            _ => {}
+        }
+        return;
+    }
+
     if app.mode == Mode::FilterInput {
         match key.code {
             KeyCode::Enter => app.apply_filter(),
@@ -187,6 +196,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('C') => app.collapse_completed(),
         KeyCode::Char('Z') => app.collapse_all(),
         KeyCode::Char('X') => app.expand_all(),
+        KeyCode::Char('S') => app.show_stats = true,
         KeyCode::Char('f') => app.begin_filter(),
         KeyCode::Char('s') => app.cycle_sort(),
         KeyCode::Esc => app.clear_filter(),
@@ -216,13 +226,13 @@ fn draw(f: &mut Frame, app: &App) {
     } else {
         match app.view {
             View::Goals => {
-                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  C: done  Z: all  X: expand all  j/k  Tab  q".to_string()
+                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  S: stats  C: done  Z: all  X: expand all  j/k  Tab  q".to_string()
             }
             View::Inline if app.filter.is_some() => {
-                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
+                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  S: stats  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  s: sort  Enter: toggle  l/h: fold  e: edit  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
+                "f: filter  s: sort  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
             }
         }
     };
@@ -235,6 +245,9 @@ fn draw(f: &mut Frame, app: &App) {
     }
     if app.mode == Mode::CellEdit {
         draw_cell_edit(f, &app.cell_input);
+    }
+    if app.show_stats {
+        draw_stats(f, app);
     }
 }
 
@@ -260,6 +273,19 @@ fn draw_cell_edit(f: &mut Frame, input: &str) {
         .title("Edit state  (Enter: save  Esc: cancel)");
     f.render_widget(
         ratatui::widgets::Paragraph::new(Line::from(format!("> {}█", input))).block(block),
+        area,
+    );
+}
+
+/// Render the stats dashboard popup.
+fn draw_stats(f: &mut Frame, app: &App) {
+    let area = centered_rect(60, 70, f.area());
+    f.render_widget(Clear, area);
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .title("Stats Dashboard  (S or Esc to close)");
+    f.render_widget(
+        ratatui::widgets::Paragraph::new(app.compute_stats()).block(block),
         area,
     );
 }
@@ -340,6 +366,7 @@ struct App {
     expanded_inline: HashSet<String>,
     quit: bool,
     show_help: bool,
+    show_stats: bool,
     pending_edit: Option<(PathBuf, usize)>,
 }
 
@@ -389,6 +416,7 @@ impl App {
             expanded_inline,
             quit: false,
             show_help: false,
+            show_stats: false,
             pending_edit: None,
         }
     }
@@ -426,6 +454,65 @@ impl App {
             self.rebuild_inline();
             self.inline_selected = 0;
         }
+    }
+
+    /// Compute stats lines for the `S` dashboard.
+    fn compute_stats(&self) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+
+        let mut prio = [0usize; 5];
+        for t in &self.inline_tasks {
+            match &t.metadata.priority {
+                Some(crate::model::Priority::High) => prio[0] += 1,
+                Some(crate::model::Priority::Med) => prio[1] += 1,
+                Some(crate::model::Priority::Low) => prio[2] += 1,
+                Some(crate::model::Priority::Other(_)) => prio[3] += 1,
+                None => prio[4] += 1,
+            }
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from("Priority"));
+        lines.push(Line::from(format!(
+            "  high:{}  med:{}  low:{}  other:{}  untagged:{}",
+            prio[0], prio[1], prio[2], prio[3], prio[4]
+        )));
+
+        let mut kw: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for t in &self.inline_tasks {
+            *kw.entry(t.keyword.to_uppercase()).or_default() += 1;
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from("Keyword"));
+        let kw_list: Vec<String> = kw.iter().map(|(k, c)| format!("  {k}:{c}")).collect();
+        lines.push(Line::from(kw_list.join(" ")));
+
+        let mut dirs: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for t in &self.inline_tasks {
+            let path_s = t.span.path.to_string_lossy().to_string();
+            let comps: Vec<&str> = path_s.split('/').collect();
+            if comps.len() >= 2 {
+                let dir = format!("{}/{}", comps[0], comps[1]);
+                *dirs.entry(dir).or_default() += 1;
+            } else if let Some(name) = comps.first() {
+                *dirs.entry(name.to_string()).or_default() += 1;
+            }
+        }
+        let mut ds: Vec<(&String, &usize)> = dirs.iter().collect();
+        ds.sort_by(|a, b| b.1.cmp(a.1));
+        lines.push(Line::from(""));
+        lines.push(Line::from("Top directories"));
+        for (dir, count) in ds.iter().take(5) {
+            lines.push(Line::from(format!("  {dir}/  [{count}]")));
+        }
+
+        let stale = self.inline_tasks.iter().filter(|t| t.is_stale(365)).count();
+        lines.push(Line::from(""));
+        lines.push(Line::from(format!(
+            "Stale: {stale} / {}",
+            self.inline_tasks.len()
+        )));
+
+        lines
     }
 
     /// Recompute the displayed inline tasks from the current filter, apply
