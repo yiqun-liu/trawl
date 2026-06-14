@@ -231,7 +231,7 @@ checkbox tree (milestones, tasks, sub-tasks).
 │ ▸ Understanding Linux VM Manager  misc/books/  [========-]  90%│
 │ ▸ Sprint 15: Auth Refactor       (root)     [=======--]  55%   │
 ├──────────────────────────────────────────────────────────────┤
-│ Enter: toggle  l: expand  h: collapse  Space: ✓  e: edit Tab │
+│ Enter: toggle  l: expand  h: collapse  Space: ✓  g: blame  e: edit  S: stats │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -268,7 +268,7 @@ description, and optional priority badge.
 │     ▸ memory-management/  [19]                               │
 │ ▼ tool/  [33]                                                │
 ├──────────────────────────────────────────────────────────────┤
-│ Enter: expand  f: filter  s: sort  Tab: Goals  q: quit       │
+│ Enter: expand  f: filter  s: sort  g: blame  Tab: Goals  q: quit       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -289,6 +289,10 @@ the source file and optional git blame below it. Press `Enter` again to
 collapse. No separate panel or view switch — the user keeps their position
 in the tree.
 
+> **Not yet implemented.** Inline expansion (context lines from the source
+> file) is deferred. (`Enter` currently toggles fold state on the parent
+> node — see Behaviors above.)
+
 ### Filtering
 
 Press `f` to open a filter prompt; type a query and press `Enter`. Each term
@@ -306,7 +310,6 @@ filter. Filtering applies to the inline tasks view.
 | *(free text)* | `null user` | tasks whose description contains it |
 
 Not yet implemented: full path globs (`path:` is a substring match today).
-Stale filtering depends on git blame enrichment (see Git Integration).
 
 ### Sorting
 
@@ -349,9 +352,8 @@ Blame data is stored on each [`InlineTask`]:
 - `blame_date: Option<NaiveDateTime>` — commit date, or `None`
 - `blame_commit: Option<String>` — short commit hash (8 chars), or `None`
 
-Enrichment only runs when `display.show_git_blame = true` (default: `false`)
-to avoid the overhead of spawning libgit2 for every scan. A TUI `g` key
-toggles blame info in the inline expansion view.
+Enrichment only runs when `display.show_git_blame = true` (default: `true`).
+A TUI `g` key toggles blame annotations on inline task rows and goal items.
 
 #### Age and stale detection
 
@@ -375,7 +377,7 @@ The unified filter prompt supports a `stale` term:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `display.show_git_blame` | `false` | Enable blame enrichment (adds git2 overhead) |
+| `display.show_git_blame` | `true` | Enable blame enrichment (adds git2 overhead) |
 | `display.stale_threshold_days` | `365` | Age after which an item is considered stale |
 
 Enabling blame adds a `git2` dependency and a per-scan blame pass. When
@@ -488,7 +490,7 @@ due = ["due", "deadline", "target"]
 
 [display]
 default_sort = "path"
-show_git_blame = false
+show_git_blame = true
 context_lines = 2
 auto_expand_priority = "high"
 stale_threshold_days = 365
