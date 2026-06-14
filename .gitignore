@@ -16,3 +16,6 @@ Thumbs.db
 
 # Agent local overrides (per-developer, untracked)
 .AGENTS.md
+
+# Agent skills (local deployment)
+.agents/
