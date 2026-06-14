@@ -16,12 +16,12 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::{Goal, GoalItem};
+use crate::model::{Goal, GoalItem, Status};
 
 /// Which goal a row belongs to. Headers and milestones are foldable; tasks
 /// (leaves) are not.
 pub(super) enum GoalRowKind {
-    Header { key: String },
+    Header { key: String, completed: bool },
     Milestone { key: String },
     Task,
 }
@@ -42,8 +42,12 @@ pub(super) fn flatten_goals(goals: &[Goal], expanded: &HashSet<String>) -> Vec<G
             '▸'
         };
         let pct = (goal.progress() * 100.0).round() as u32;
+        let completed = goal.status() == Status::Completed;
         rows.push(GoalRow {
-            kind: GoalRowKind::Header { key: key.clone() },
+            kind: GoalRowKind::Header {
+                key: key.clone(),
+                completed,
+            },
             text: format!("{marker} {}  {}  {}%", goal.title, goal.badge, pct),
         });
         if expanded.contains(&key) {
@@ -94,7 +98,15 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
     let items: Vec<ListItem> = app
         .goal_rows
         .iter()
-        .map(|row| ListItem::new(Line::from(row.text.clone())))
+        .map(|row| {
+            let style = match &row.kind {
+                GoalRowKind::Header {
+                    completed: true, ..
+                } => Style::default().add_modifier(Modifier::DIM | Modifier::CROSSED_OUT),
+                _ => Style::default(),
+            };
+            ListItem::new(Line::from(row.text.clone()).style(style))
+        })
         .collect();
 
     let list = List::new(items)

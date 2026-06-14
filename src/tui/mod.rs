@@ -24,7 +24,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::model::{Goal, InlineTask};
+use crate::model::{Goal, InlineTask, Status};
 use crate::ScanResult;
 
 mod goals;
@@ -104,6 +104,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('l') => app.expand_selected(),
         KeyCode::Enter => app.toggle_selected(),
         KeyCode::Char('h') | KeyCode::Backspace => app.collapse_selected(),
+        KeyCode::Char('C') => app.collapse_completed(),
         _ => {}
     }
 }
@@ -122,7 +123,7 @@ fn draw(f: &mut Frame, app: &App) {
 
     let hint = match app.view {
         View::Goals => {
-            "Enter: toggle  l: expand  h: collapse  j/k: move  Tab: Inline Tasks  q: quit"
+            "Enter: toggle  l: expand  h: collapse  C: collapse done  j/k: move  Tab: Inline Tasks  q: quit"
         }
         View::Inline => "Tab: Goals  q: quit",
     };
@@ -239,6 +240,19 @@ impl App {
                     }
                 }
             }
+        }
+    }
+
+    /// `C`: collapse every completed (100%) goal in one keystroke.
+    fn collapse_completed(&mut self) {
+        let mut changed = false;
+        for (gi, goal) in self.goals.iter().enumerate() {
+            if goal.status() == Status::Completed && self.goal_expanded.remove(&format!("g{gi}")) {
+                changed = true;
+            }
+        }
+        if changed {
+            self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded);
         }
     }
 

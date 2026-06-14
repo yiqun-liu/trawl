@@ -241,6 +241,8 @@ checkbox tree (milestones, tasks, sub-tasks).
 - `j/k` navigates the tree (goals, milestones, tasks)
 - Milestones show per-group ratio (e.g., `2/3`)
 - Color coding: done items dimmed, high-priority items highlighted
+- Completed goals render dimmed and struck-through; press `C` to collapse
+  every completed goal at once
 
 ### TUI — Inline Tasks View
 
@@ -344,6 +346,7 @@ keybindings — the overlay adapts.
 │    /            search by text                   │
 │                                                  │
 │  Other                                           │
+│    C            collapse completed goals         │
 │    S            stats dashboard                  │
 │    e            edit file at cursor              │
 │    q            quit                             │
