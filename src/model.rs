@@ -96,6 +96,19 @@ pub struct InlineTask {
     pub blame_commit: Option<String>,
 }
 
+impl InlineTask {
+    /// Whether this task is stale (older than `threshold_days`).
+    /// Tasks without blame data are never stale.
+    pub fn is_stale(&self, threshold_days: u32) -> bool {
+        let Some(date) = self.blame_date else {
+            return false;
+        };
+        let now = chrono::Utc::now().naive_utc();
+        let age = now - date;
+        age.num_days() > threshold_days as i64
+    }
+}
+
 /// One checkbox node or one table row in a goal tracker.
 ///
 /// A node with no children is a *task*; a node with children is a

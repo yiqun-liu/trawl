@@ -2,11 +2,8 @@
 //!
 //! A compact query language parsed from a single input line. Each whitespace-
 //! separated token is either `field:value` (one of `kw`/`keyword`, `tag`,
-//! `owner`, `pri`/`priority`, `path`) or free text (matched as a substring of
-//! the task description). All specified terms are AND-ed.
-//!
-//! Stale-only (Phase 3 git blame) and full path globs are out of scope here;
-//! `path:` is a substring match.
+//! `owner`, `pri`/`priority`, `path`, `stale`) or free text. All specified
+//! terms are AND-ed.
 
 use crate::model::{InlineTask, Priority};
 
@@ -18,6 +15,7 @@ pub(super) struct Filter {
     priority: Option<Priority>,
     path: Option<String>,
     text: Option<String>,
+    stale: Option<bool>,
 }
 
 impl Filter {
@@ -34,9 +32,13 @@ impl Filter {
                     "owner" => f.owner = Some(value),
                     "pri" | "priority" => f.priority = Some(Priority::parse(&value)),
                     "path" => f.path = Some(value),
+                    "stale" => f.stale = Some(true),
                     // Unknown field: ignore the token.
                     _ => {}
                 }
+            } else if token.eq_ignore_ascii_case("stale") {
+                // Bare `stale` is equivalent to `stale:yes`.
+                f.stale = Some(true);
             } else {
                 text_parts.push(token);
             }
@@ -55,6 +57,7 @@ impl Filter {
             && self.priority.is_none()
             && self.path.is_none()
             && self.text.is_none()
+            && self.stale.is_none()
     }
 
     /// True if the task satisfies every set term (AND).
@@ -98,6 +101,15 @@ impl Filter {
                 .to_ascii_lowercase()
                 .contains(&text.to_ascii_lowercase())
             {
+                return false;
+            }
+        }
+        if let Some(wanted_stale) = self.stale {
+            let is_stale = task.is_stale(365);
+            if wanted_stale && !is_stale {
+                return false;
+            }
+            if !wanted_stale && is_stale {
                 return false;
             }
         }

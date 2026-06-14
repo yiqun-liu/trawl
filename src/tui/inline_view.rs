@@ -154,6 +154,11 @@ fn flatten_dir(
                     ),
                     style: keyword_style(&task.keyword),
                 });
+                if task.is_stale(365) {
+                    let last = rows.last_mut().unwrap();
+                    last.text.push_str("  [stale]");
+                    last.style = last.style.add_modifier(Modifier::DIM);
+                }
             }
         }
     }
