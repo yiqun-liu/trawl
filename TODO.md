@@ -141,15 +141,15 @@ For syntax specification, see `docs/syntax.md`.
 ### Phase 3 — Git + Stats
 
 - [ ] Git Blame Enrichment
-  - [ ] Implement blame lookup using `git2` crate
-  - [ ] Store blame data alongside inline task results
+  - [x] Implement blame lookup using `git2` crate
+  - [x] Store blame data alongside inline task results
   - [ ] Display blame line in inline expansion view
   - [ ] Add `g` keybinding to toggle blame display
-- [ ] Stale Detection
-  - [ ] Calculate age from blame commit date
-  - [ ] Apply configurable stale threshold (`stale_threshold_days`)
-  - [ ] Mark stale items in scan results
-  - [ ] Surface stale count in stats bar
+- [x] Stale Detection
+  - [x] Calculate age from blame commit date
+  - [x] Apply configurable stale threshold (`stale_threshold_days`)
+  - [x] Mark stale items in scan results
+  - [x] Surface stale count in stats bar
 - [ ] Stats Dashboard
   - [ ] Count tasks by priority, keyword, and tag
   - [ ] Calculate top directories by task count
