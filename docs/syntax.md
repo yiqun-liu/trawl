@@ -74,16 +74,18 @@ effort = "%"     # e.g., %2h for estimated effort
 
 ### Section Detection
 
-A goal tracker is a markdown section named `GOAL TRACKER`.
+A goal tracker is a markdown section whose heading matches one of the
+configured section names (case-insensitive, exact match).
 
 **Detection rules:**
 
-1. Scan markdown headings for one matching `GOAL TRACKER` (case-insensitive).
+1. Scan markdown headings for a case-insensitive match against any name in
+   `goal_section_names` (configurable; defaults are `GOAL TRACKER` and
+   `TODO`).
 2. The heading may be any level (`#`, `##`, `###`, etc.).
 3. The section's content extends until the next heading of the **same or
    higher** level (or end of file).
-4. Only the first `GOAL TRACKER` section in a file is parsed.
-5. Configurable: `goal_section_names` in config (default: `["GOAL TRACKER"]`).
+4. Only the first matching section in a file is parsed.
 
 **Example — section boundaries:**
 

@@ -201,6 +201,7 @@ TODO: add examples for cache types #arch
 |---------|-------------|
 | Recursive walk | Walk entire repo tree from root |
 | `.gitignore` awareness | Skip ignored files (via `ignore` crate) |
+| Untracked files | Skip files not tracked by git when `only_tracked = true` (default) |
 | Binary detection | Skip non-text files (null byte heuristic) |
 | File type filtering | Configurable include/exclude globs |
 | Max file size | Skip files above threshold (default: 1 MB) |
@@ -418,6 +419,7 @@ include = []  # e.g. ["*.md", "*.rs", "*.py"] — restrict to specific file type
 exclude = ["target/", "node_modules/", ".git/"]  # built-in defaults; project config merges with these (union)
 max_file_size = "1MB"
 scan_hidden = false
+only_tracked = true
 
 [tokens]
 owner = "@"
@@ -449,11 +451,12 @@ files passed to the scanner:
 | Stage | Source | Behavior |
 |-------|--------|----------|
 | 1. `.gitignore` | Implicit | Git-ignored files are never scanned |
-| 2. `exclude` | Config | Files/dirs matching any glob are skipped (blacklist) |
-| 3. `include` | Config | When non-empty, only matching files are scanned (whitelist). When empty (default), no extension restriction applies |
-| 4. `scan_hidden` | Config | When `false`, dotfiles and dot-directories are skipped |
-| 5. `max_file_size` | Config | Files exceeding the threshold are skipped |
-| 6. Binary detection | Heuristic | Files containing null bytes are skipped |
+| 2. untracked | Config | When `only_tracked = true` (default), files not tracked by `git` are skipped |
+| 3. `exclude` | Config | Files/dirs matching any glob are skipped (blacklist) |
+| 4. `include` | Config | When non-empty, only matching files are scanned (whitelist). When empty (default), no extension restriction applies |
+| 5. `scan_hidden` | Config | When `false`, dotfiles and dot-directories are skipped |
+| 6. `max_file_size` | Config | Files exceeding the threshold are skipped |
+| 7. Binary detection | Heuristic | Files containing null bytes are skipped |
 
 `exclude` is always applied (blacklist). `include` is an optional
 whitelist — when omitted or empty, the tool scans all non-ignored,

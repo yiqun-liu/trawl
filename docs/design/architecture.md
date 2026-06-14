@@ -179,17 +179,18 @@ and sort flags arrive with the TUI phase.
 
 ## Scanner pipeline (`scanner/`)
 
-The walker applies the six-stage filter pipeline exactly as specified in
+The walker applies the filter pipeline exactly as specified in
 `requirements.md` → Scan Filtering Semantics:
 
 | Stage | Source | Implementation |
 |-------|--------|----------------|
 | 1. `.gitignore` | implicit | `ignore::WalkBuilder` standard filters |
-| 2. `exclude` | config | `ignore::overrides::Override` (negated globs) or `filter_entry` |
-| 3. `include` | config | `ignore::overrides::Override` when non-empty |
-| 4. `scan_hidden` | config | `WalkBuilder::hidden(!scan_hidden)` |
-| 5. `max_file_size` | config | `filter_entry` checking file length |
-| 6. binary | heuristic | null-byte check on read (skip) |
+| 2. untracked | config | `only_tracked = true` (default): skip files not in `git ls-files` |
+| 3. `exclude` | config | `ignore::overrides::Override` (negated globs) or `filter_entry` |
+| 4. `include` | config | `ignore::overrides::Override` when non-empty |
+| 5. `scan_hidden` | config | `WalkBuilder::hidden(!scan_hidden)` |
+| 6. `max_file_size` | config | `filter_entry` checking file length |
+| 7. binary | heuristic | null-byte check on read (skip) |
 
 The walker yields candidate paths. `reader.rs` then reads them in parallel
 with `rayon`, performs binary detection (skip files containing a `0x00`
@@ -232,7 +233,7 @@ is needed beyond slicing from the keyword.
 `parse(content, source_file, ctx) -> Option<Goal>`:
 
 1. **Section detection** — scan headings for the first case-insensitive match
-   of a configured section name (default `GOAL TRACKER`) at any level.
+   of a configured section name (defaults: `GOAL TRACKER`, `TODO`) at any level.
    Record that level. The section body extends until the next heading of
    the same or higher level, or EOF. Only the first match is parsed.
 2. **Checkbox tree** — for each `- [x]` / `- [ ]` line, compute its indent
