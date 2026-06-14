@@ -850,4 +850,131 @@ mod tests {
         let outer = milestone("outer", true, vec![inner]);
         assert!(!subtree_done(&outer));
     }
+
+    // ---- cursor stability across row rebuilds ----
+
+    fn goal(title: &str, items: Vec<GoalItem>) -> Goal {
+        Goal {
+            title: title.into(),
+            source_file: PathBuf::from("x.md"),
+            badge: "(root)".into(),
+            items,
+        }
+    }
+
+    /// goalA: active (milestone m1 with leaves a unchecked + b checked, plus
+    /// leaf c). goalB: completed (single checked leaf d).
+    fn sample_goals() -> Vec<Goal> {
+        let m1 = milestone("m1", false, vec![leaf("a", false), leaf("b", true)]);
+        let goal_a = goal("A", vec![m1, leaf("c", false)]);
+        let goal_b = goal("B", vec![leaf("d", true)]); // 100% -> Completed
+        vec![goal_a, goal_b]
+    }
+
+    fn select_goal(app: &mut App, id: &str) {
+        app.rebuild_active();
+        let i = app
+            .goal_rows
+            .iter()
+            .position(|r| goal_row_id(r) == id)
+            .unwrap();
+        app.goal_selected = i;
+    }
+
+    fn selected_goal_id(app: &App) -> String {
+        goal_row_id(&app.goal_rows[app.goal_selected])
+    }
+
+    #[test]
+    fn ancestor_id_walks_up() {
+        assert_eq!(ancestor_id("g0/1/2"), Some("g0/1".to_string()));
+        assert_eq!(ancestor_id("g0"), None);
+        assert_eq!(ancestor_id("src/a.rs::42"), Some("src/a.rs".to_string()));
+        assert_eq!(ancestor_id("src/a.rs"), Some("src".to_string()));
+        assert_eq!(ancestor_id("src"), None);
+    }
+
+    #[test]
+    fn expand_all_keeps_cursor_on_later_goal() {
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        select_goal(&mut app, "g1"); // cursor on goalB header
+        app.expand_all(); // X: expands everything above; index would drift
+        assert_eq!(selected_goal_id(&app), "g1");
+    }
+
+    #[test]
+    fn collapse_all_moves_cursor_to_ancestor() {
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        app.goal_expanded.insert("g0".into());
+        app.goal_expanded.insert("g0/0".into());
+        select_goal(&mut app, "g0/0/0"); // cursor on leaf "a"
+        app.collapse_all(); // Z
+        assert_eq!(selected_goal_id(&app), "g0"); // leaf gone -> goal header
+    }
+
+    #[test]
+    fn collapse_leaf_moves_cursor_to_parent() {
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        app.goal_expanded.insert("g0".into());
+        app.goal_expanded.insert("g0/0".into());
+        select_goal(&mut app, "g0/0/0"); // leaf "a"
+        app.collapse_selected(); // h: folds parent milestone m1
+        assert_eq!(selected_goal_id(&app), "g0/0");
+    }
+
+    #[test]
+    fn expand_node_keeps_cursor() {
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        select_goal(&mut app, "g0"); // goalA header, collapsed
+        app.expand_selected(); // l
+        assert_eq!(selected_goal_id(&app), "g0");
+    }
+
+    #[test]
+    fn toggle_leaf_moves_cursor_to_parent() {
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        app.goal_expanded.insert("g0".into());
+        app.goal_expanded.insert("g0/0".into());
+        select_goal(&mut app, "g0/0/0"); // leaf "a"
+        app.toggle_selected(); // Enter: collapses parent m1
+        assert_eq!(selected_goal_id(&app), "g0/0");
+    }
+
+    #[test]
+    fn collapse_completed_reanchors_to_ancestor() {
+        let mut app = App::new(sample_goals(), vec![], PathBuf::from("."));
+        app.goal_expanded.insert("g1".into()); // expand completed goalB
+        select_goal(&mut app, "g1/0"); // leaf "d" under goalB
+        app.collapse_completed(); // C: collapses goalB
+        assert_eq!(selected_goal_id(&app), "g1"); // d gone -> goalB header
+    }
+
+    fn itask(path: &str, line: usize) -> InlineTask {
+        InlineTask {
+            keyword: "TODO".into(),
+            scope: None,
+            description: "x".into(),
+            metadata: Metadata::default(),
+            span: Span {
+                path: PathBuf::from(path),
+                line,
+            },
+        }
+    }
+
+    #[test]
+    fn expand_all_inline_keeps_cursor() {
+        let tasks = vec![itask("a/x.rs", 1), itask("b/y.rs", 2)];
+        let mut app = App::new(vec![], tasks, PathBuf::from("."));
+        app.view = View::Inline;
+        app.rebuild_active();
+        // cursor on "b/" (index would drift as "a/" expands above it)
+        app.inline_selected = app
+            .inline_rows
+            .iter()
+            .position(|r| inline_row_id(r) == "b")
+            .unwrap();
+        app.expand_all();
+        assert_eq!(inline_row_id(&app.inline_rows[app.inline_selected]), "b");
+    }
 }
