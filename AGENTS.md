@@ -69,7 +69,7 @@ Preferred verification:
 
 ```bash
 cargo build
-cargo clippy
+cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 

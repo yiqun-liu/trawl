@@ -94,7 +94,27 @@ TODO
 
 ## Testing
 
-TODO
+Treat tests as part of the feature, not an afterthought.
+
+- **Parser changes are TDD.** Add a fixture under `tests/fixtures/inline/`
+  or `tests/fixtures/goal/` *before* the parser code. The fixture encodes
+  the expected behavior; the test asserts it.
+- **Unit tests are inline.** Pure logic lives in `#[cfg(test)] mod tests`
+  within the module it tests (metadata extraction, progress math, badge
+  derivation, row flattening). Keep terminal/IO out of these so they run
+  fast and headless.
+- **Integration tests drive the public API.** Tests under `tests/` build a
+  temporary tree (`tempfile`), scan it, and assert on the `ScanResult`.
+  They never touch a real terminal.
+- **Malformed input is a first-class case.** Every parser has a "does not
+  panic on malformed input" contract: unparseable lines, broken tables, and
+  unknown tokens are skipped. The scanner continues; the user never sees a
+  crash from a bad file.
+- **The commit gate is four green checks:**
+  `cargo build`, `cargo clippy --all-targets -- -D warnings`, `cargo test`,
+  and `cargo fmt --check`. All must pass before a commit.
+
+See `docs/design/architecture.md` → Testing strategy for the rationale.
 
 ## Comments
 
