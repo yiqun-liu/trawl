@@ -137,13 +137,18 @@ fn flatten_dir(
                     .as_deref()
                     .map(|s| format!("({s})"))
                     .unwrap_or_default();
+                let badge = task
+                    .metadata
+                    .priority
+                    .as_ref()
+                    .map_or(String::new(), |p| format!("  [{}]", p.label()));
                 rows.push(InlineRow {
                     kind: InlineRowKind::Task {
                         parent_key: key.clone(),
                     },
                     text: format!(
-                        "{task_indent}L{}  {}{}  {}",
-                        task.span.line, task.keyword, scope, task.description
+                        "{task_indent}L{}  {}{}  {}{}",
+                        task.span.line, task.keyword, scope, task.description, badge
                     ),
                     style: priority_style(task.metadata.priority.as_ref()),
                 });

@@ -146,6 +146,11 @@ fn push_item(
     let indent = "  ".repeat(depth);
     let check = if item.checked { 'x' } else { ' ' };
     let style = item_style(item);
+    let badge = item
+        .metadata
+        .priority
+        .as_ref()
+        .map_or(String::new(), |p| format!("  [{}]", p.label()));
 
     if item.children.is_empty() {
         // Leaf task: not foldable; remembers its parent so keys act on it.
@@ -154,7 +159,7 @@ fn push_item(
                 key: key.to_string(),
                 parent_key: parent_key.to_string(),
             },
-            text: format!("{indent}[{check}] {}", item.text),
+            text: format!("{indent}[{check}] {}{badge}", item.text),
             style,
         });
     } else {
@@ -164,7 +169,7 @@ fn push_item(
             kind: GoalRowKind::Milestone {
                 key: key.to_string(),
             },
-            text: format!("{indent}{marker} [{check}] {}", item.text),
+            text: format!("{indent}{marker} [{check}] {}{badge}", item.text),
             style,
         });
         if expanded.contains(key) {

@@ -35,6 +35,16 @@ impl Priority {
         }
     }
 
+    /// Short display label for badges (`high`/`med`/`low`/the custom value).
+    pub fn label(&self) -> &str {
+        match self {
+            Priority::High => "high",
+            Priority::Med => "med",
+            Priority::Low => "low",
+            Priority::Other(s) => s.as_str(),
+        }
+    }
+
     /// Sort rank: higher means more urgent. [`Priority::Other`] sorts below
     /// the defined levels so unknown custom values never outrank the triage set.
     pub fn rank(&self) -> u8 {
