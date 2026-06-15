@@ -36,18 +36,41 @@ This project is licensed under MIT OR Apache-2.0. See `LICENSE-MIT` and
 - **Git Integration**: blame enrichment and stale detection for inline
   tasks
 
-## Quick Start
+## Installation
 
-Prerequisites:
-- Rust toolchain (stable)
+### Build from source
 
-Build and run:
+Prerequisites: Rust toolchain (stable).
+
 ```bash
 cargo build --release
-./target/release/trawl
+```
+
+Copy the binary to a directory in your PATH:
+
+```bash
+cp ./target/release/trawl ~/.local/bin/
+```
+
+The release binary dynamically links libssl, libcrypto, libz, and
+libbrotli — all standard on typical Linux desktop distros. If those
+libraries are present, copying the binary into your PATH is sufficient.
+
+### cargo install
+
+Not yet available. `cargo install trawl` will work once trawl is
+published to crates.io.
+
+## Quick Start
+
+Run trawl in a repository:
+
+```bash
+trawl
 ```
 
 Point trawl at a specific repository:
+
 ```bash
 trawl --path /path/to/repo
 ```
@@ -78,8 +101,9 @@ For the full configuration reference, see `docs/requirements.md`.
   reference, and phased implementation plan
 - `docs/syntax.md` — formal syntax specification for goal trackers and inline
   tasks
-- `docs/writing-goals.md` — practical guide to creating trawl-compatible goal
-  trackers (includes a quick reference for AI agents)
+- `docs/goal-tracker-compatibility.md` — comprehensive reference for writing,
+  checking, and normalizing trawl-compatible goal trackers (fetchable by
+  external tools and skills)
 - `docs/guidelines.md` — development guidelines and commit message conventions
 - `TODO.md` — implementation progress tracker (goal tracker format)
 - `docs/README.md` — documentation index
