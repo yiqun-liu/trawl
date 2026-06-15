@@ -1,0 +1,530 @@
+# Goal Tracker Compatibility
+
+**trawl** is a TUI tool that discovers work items embedded in your
+repository. It scans markdown files for *goal tracker* sections —
+structured progress trackers that represent multi-week objectives like
+courses, book chapters, or project milestones — and renders them as an
+interactive dashboard with progress percentages, hierarchical folding,
+and metadata filtering.
+
+Goal trackers live entirely in your markdown files: no database, no
+frontmatter, no special file format. You write a `## GOAL TRACKER`
+section, trawl finds it, and the files *are* the database.
+
+This document explains how to make goal trackers work with trawl —
+whether you are **writing** new ones, **checking** existing ones for
+compatibility, or **normalizing** non-compatible trackers into trawl's
+format. It follows trawl's scanning pipeline: detection → syntax →
+metadata → interpretation → configuration → verification. Each stage
+answers a distinct question, from "can trawl even find my content?" down
+to "how do I adapt trawl to my vocabulary?".
+
+**Scope**: this document covers goal trackers only. Inline markers
+(`TODO`, `FIXME`, `HACK`, etc. in any source file) are a separate
+annotation type and out of scope here — see `docs/syntax.md` for their
+syntax.
+
+**Configuration**: trawl is configurable via `.trawl.toml`, a per-project
+TOML file in the repository root. Throughout this document, values
+labelled "default" can be overridden in `.trawl.toml`. The config
+section at the end lists all defaults and explains when overrides are
+needed.
+
+---
+
+## Detection
+
+How trawl discovers goal tracker content in your repository.
+
+### File scanning
+
+Trawl walks the repository directory tree and decides which files to
+scan. A goal that does not appear is often a file-scanning issue, not a
+syntax issue.
+
+Files are **skipped** when any of these conditions hold:
+
+| Condition | Default | Effect |
+|-----------|---------|--------|
+| Not tracked by git | `only_tracked = true` | Untracked files are invisible to trawl |
+| Inside a dot-directory or dotfile | `scan_hidden = false` | `.agents/`, `.opencode/` etc. are skipped |
+| Matches an exclude glob | `exclude = ["target/", "node_modules/", ".git/"]` | Excluded directories are skipped (project config **merges** with built-in defaults) |
+| Exceeds size limit | `max_file_size = "1MB"` | Large files are skipped |
+| Contains null bytes | Heuristic | Binary files are skipped |
+| Not in the include whitelist (when set) | `include = []` (empty = all types) | Only whitelisted extensions are scanned |
+| Listed in `.gitignore` | Implicit | Git-ignored files are never scanned |
+
+**Diagnosis**: if a goal does not appear, check whether the file passes
+every stage above. `git ls-files <path>` confirms tracking; `ls -la`
+confirms visibility of dot-paths.
+
+### Section detection
+
+Within a scanned file, trawl looks for a markdown section whose heading
+matches a configured section name.
+
+| Rule | Detail |
+|------|--------|
+| Section names | `GOAL TRACKER` and `TODO` by default (configurable via `goal_section_names`) |
+| Matching | **Case-insensitive, exact match** on the heading text after stripping `#` markers. Not substring — `## My TODO list` does not match. |
+| Heading level | Any level (`#` through `######`) |
+| First-match-only | Only the first matching heading in a file is parsed. A second `## GOAL TRACKER` is ignored. |
+| Section boundary | Content extends until the next heading of **same or higher level**, or end of file. |
+
+```markdown
+# CS146s: The Modern Software Developer
+
+Some intro text.                    ← ignored (outside section)
+
+## GOAL TRACKER                     ← section starts
+
+- [x] Week 1: Introduction          ← parsed (milestone)
+  - [x] Lecture 1                   ← parsed (task)
+
+## References                       ← section ends (same level)
+- [Stanford CS146s](...)            ← ignored
+```
+
+Everything outside the detected section is free-form notes — ignored by
+trawl.
+
+### File-level derived fields
+
+Two fields are derived from the file itself, before any section content
+is parsed:
+
+| Field | Derivation | Example |
+|-------|-----------|---------|
+| **Title** | First `# H1` heading in the file. Fallback: filename without extension. | `"CS146s: The Modern Software Developer"` |
+| **Badge** | Super-directory of the file's owning directory; `(root)` when at or one level under the root. | `ml/llm/` |
+
+---
+
+## Syntax
+
+What format trawl parses inside a detected section.
+
+Within the tracker section, trawl recognizes **only two element types**:
+checkbox items and tables. Everything else — headings (`###`, `####`),
+paragraphs, plain bullets, images, code blocks, and blank lines — is
+ignored. This lets you mix context notes and visual formatting freely.
+
+### Choosing a format
+
+| Format | Best for | Trade-offs |
+|--------|----------|------------|
+| **Checkbox list** | Simple tracking, hierarchical goals (courses, book chapters, multi-phase projects) | Naturally expresses milestones → tasks via indentation. Lightweight — one line per item. Metadata tokens are inline. |
+| **Table** | Rich information per item (status, owner, priority, due, custom fields) | Compact for flat task lists with multiple columns. Each row is a **leaf task** — no milestone/task distinction. Hierarchy can be approximated by adding a `Level` or `Phase` column for the human reader, but trawl still treats every row as a flat leaf. |
+| **Mixed** | Both hierarchical structure and dense per-group metadata | Use checkboxes for the hierarchy, tables for groups that need per-item columns. `###` headings between groups are decorative — ignored by trawl but useful for visual separation. |
+
+**Guideline**: start with checkboxes. Switch to tables (or mixed) when
+each item carries more than one tracked attribute beyond the task name
+itself. A flat topic list does not need a table; a list where every item
+has a status, an owner, and a deadline does.
+
+### Checkbox items
+
+```
+- [x] a completed item
+- [ ] a pending item
+```
+
+| Aspect | Rule |
+|--------|------|
+| List markers | `-`, `*`, or `+` (markdown-conventional: `-`) |
+| Checked characters | `x`, `X`, or `✓` mean done; a space means not done |
+| Indentation | **2 spaces per level** (the Markdown standard). Indentation defines hierarchy: items with indented children are *milestones*; items without children are *leaf tasks*. Deeper nesting creates sub-tasks naturally. |
+
+```markdown
+## GOAL TRACKER
+
+- [x] Week 1: Introduction
+  - [x] Lecture 1: How an LLM is made
+  - [x] Assignment 1: Basic prompting
+  - [ ] Reading: Prompt Engineering Guide !low
+    - [ ] Skim the introduction
+    - [ ] Take detailed notes on sections 2-4
+- [ ] Week 2: Power Prompting
+  - [ ] Lecture 3 !high @yiqun
+  - [ ] Assignment 2
+- [ ] Buy textbook
+```
+
+`###` and other headings within the section are **decorative** — ignored
+by trawl's parser. They organize content for the human reader only; all
+checkbox items are parsed as a single flat sequence regardless of any
+internal headings.
+
+### Tables
+
+Tables provide a compact, columnar format for flat task lists with
+per-task metadata. Each row is a **leaf task** — no milestone/task
+distinction.
+
+#### Column detection
+
+Trawl maps columns by scanning header names with **case-insensitive
+substring matching** against configurable keyword lists:
+
+| Field | Default keywords | Required? |
+|-------|-----------------|-----------|
+| Task description | `task`, `item`, `name`, `todo`, `work` | **Yes** — at least one column must map to "task", otherwise the entire table is skipped |
+| Completion state | `state`, `status`, `done`, `progress`, `check` | Optional — if no state column is found, all rows default to not-done |
+| Owner | `owner`, `assignee`, `who` | Optional |
+| Priority | `priority`, `pri` | Optional |
+| Tag | `tag`, `category`, `label` | Optional |
+| Due date | `due`, `deadline`, `target` | Optional |
+| *(anything else)* | Custom field: key = header text, value = cell content | — |
+
+> **Substring matching**: "Chapter" does not contain any task keyword
+> (`task`, `item`, `name`, `todo`, `work`), so a `| Chapter |` column
+> does not map to "task" unless you add `"chapter"` to
+> `headers.task` in `.trawl.toml`. Similarly, adding `"chapter"` means
+> any header *containing* "chapter" as a substring (e.g., "Chapter
+> Notes") would also match — choose keywords unlikely to cause false
+> positives.
+
+#### State column
+
+The state column indicates whether each task is done or not-done. How
+trawl interprets the cell value is covered in the **Interpretation**
+section below; syntactically, the state column is any column whose
+header contains a state keyword (`state`, `status`, `done`, `progress`,
+`check`).
+
+#### Table example
+
+```markdown
+## GOAL TRACKER
+
+| Task | State | Priority | Assignee | Estimate |
+|------|-------|----------|----------|----------|
+| OAuth2 flow | TODO | high | alice | 2d |
+| Token refresh | | med | bob | 1d |
+| Integration tests | | low | | 3d |
+| Deprecate old auth | done | med | alice | 1d |
+```
+
+Parsed as:
+
+```
+  [ ] OAuth2 flow          priority: high   owner: alice   estimate: 2d
+  [ ] Token refresh        priority: med    owner: bob     estimate: 1d
+  [ ] Integration tests    priority: low                   estimate: 3d
+  [x] Deprecate old auth   priority: med    owner: alice   estimate: 1d
+```
+
+### Mixed format
+
+Checkbox lists and tables can be freely mixed within the same section.
+`###` headings may be used for visual separation but are ignored by the
+parser:
+
+```markdown
+## GOAL TRACKER
+
+### Fundamentals
+
+- [x] Chapter 1: Introduction
+- [x] Chapter 2: Language Basics
+- [ ] Chapter 3: Data Structures !high
+
+### Practice Projects
+
+| Done | Project | Notes |
+|------|---------|-------|
+| | text editor | part 2 |
+| x | file converter | part 5 |
+```
+
+The parser sees five tasks: three from the checkbox list and two from
+the table.
+
+---
+
+## Metadata
+
+How to annotate items with structured data.
+
+### Token syntax
+
+Metadata tokens are optional, space-separated prefixes embedded anywhere
+in the item text. Trawl extracts them and removes them from the
+description — the remaining text becomes the task description.
+
+| Field | Default prefix | Example |
+|-------|---------------|---------|
+| Owner | `@` | `@yiqun` |
+| Tag | `#` | `#security` (multiple allowed: `#security #arch`) |
+| Priority | `!` | `!high` — values: `high`, `med`/`medium`, `low` (case-insensitive). Unrecognized values stored as-is. |
+| Due | `~` | `~2025-12-01` (YYYY-MM-DD format) |
+
+**Parsing rules**:
+
+- A token **starts** at a prefix character preceded by whitespace or
+  start-of-text (prevents false positives like `file#tag`).
+- A token **ends** at the next whitespace or end of string.
+- Prefixes not in the configured token set are left in the description
+  as plain text.
+
+```
+Input:  "Lecture 3: Power Prompting #security @yiqun !high ~2025-02-15"
+Parsed:
+  description = "Lecture 3: Power Prompting"
+  tags        = ["security"]
+  owner       = "yiqun"
+  priority    = high
+  due         = 2025-02-15
+```
+
+> Note: `#security` is a **tag** (prefix `#`), while `!high` is a
+> **priority** (prefix `!`). Tags are free-form labels; priorities are
+> a fixed enum. Never use `#high` for priority — it would be parsed as
+> a tag named "high", not a priority level.
+
+### Column override rule
+
+In table rows, column-based values (from recognized headers like
+"Assignee" → owner) **override** inline tokens for the same field. If a
+row has `@bob` in the task cell AND "alice" in the Assignee column, the
+owner is "alice".
+
+### Custom tokens
+
+Token prefixes are configurable via `[tokens]` in `.trawl.toml`. Add
+domain-specific metadata types:
+
+```toml
+[tokens]
+effort = "%"     # e.g., %2h for estimated effort
+```
+
+Custom tokens follow the same parsing rules: start at prefix after
+whitespace, end at next whitespace, extracted and stored as-is.
+
+---
+
+## Interpretation
+
+How trawl computes progress and status from parsed content.
+
+### Done detection
+
+Trawl has a **binary** model: every item is either done or not-done.
+There are no intermediate states like "in progress" or "blocked".
+
+**For checkbox items**: `- [x]` = done, `- [ ]` = not-done. The checked
+character (`x`, `X`, `✓`) determines the state directly.
+
+**For table state columns**: completion is determined by the done
+heuristic:
+
+```
+not-done = cell is empty OR cell contains "TODO" (case-insensitive)
+done     = everything else
+```
+
+| Cell value | Done? | Reason |
+|-----------|-------|--------|
+| *(empty)* | No | Empty |
+| `TODO` / `todo` | No | Contains `TODO` |
+| `done` | Yes | Non-empty, no `TODO` |
+| `x` / `✓` | Yes | Non-empty, no `TODO` |
+| `shipped` / `skipped` / `wontfix` | Yes | Non-empty, no `TODO` |
+| `IN PROGRESS` | Yes | Non-empty, no `TODO` |
+
+**Practical implication**: "IN PROGRESS", "wontfix", and "skipped" all
+count as done. To keep an item as not-done in a table, leave the state
+cell **empty** or write "TODO". To preserve intermediate status text,
+put it in a custom "Notes" column rather than the state column.
+
+### Progress (leaf ratio)
+
+All levels use **leaf ratio** — the ratio of done leaf tasks to total
+leaf tasks within the scope:
+
+| Scope | Formula |
+|-------|---------|
+| Leaf task (no children) | `1` if checked, `0` if not |
+| Milestone (has children) | `count(done leaves in subtree) / count(all leaves in subtree)` |
+| Goal | `count(done leaves) / count(all leaves)` |
+
+**Zero leaf tasks**: if a scope contains no leaf tasks (empty section,
+or milestones without tasks beneath them), progress is `0%` — no
+division by zero is performed.
+
+### Status
+
+| Status | Condition |
+|--------|-----------|
+| `completed` | Progress = 100% |
+| `active` | 0% < progress < 100% |
+| `planned` | Progress = 0% (including zero-leaf goals) |
+
+### Milestone checkbox independence
+
+A milestone's own checkbox state (`[x]` or `[ ]`) is **independent** of
+its children's leaf ratio. The user controls it manually. The TUI
+shows both: the checkbox state and a direct-children count (e.g.,
+`[x] Week 1  2/3`).
+
+### Table row semantics
+
+Every table row is a **leaf task** — flat, no nesting. Tables cannot
+express milestones. If hierarchical grouping is needed, use checkboxes
+for the tree and tables for per-group metadata, or add a `Level`/`Phase`
+column for visual organization (trawl ignores it for hierarchy
+computation).
+
+---
+
+## Configuration
+
+When trawl's defaults don't match your content.
+
+### Default config values
+
+```toml
+[scan]
+keywords = ["TODO", "FIXME", "HACK", "XXX", "BUG", "NOTE"]
+keyword_case_sensitive = false
+goal_section_names = ["GOAL TRACKER", "TODO"]
+include = []                      # empty = all file types
+exclude = ["target/", "node_modules/", ".git/"]   # built-in; project config merges (union)
+max_file_size = "1MB"
+scan_hidden = false
+only_tracked = true
+
+[tokens]
+owner = "@"
+tag = "#"
+priority = "!"
+due = "~"
+
+[headers]
+task = ["task", "item", "name", "todo", "work"]
+state = ["state", "status", "done", "progress", "check"]
+owner = ["owner", "assignee", "who"]
+priority = ["priority", "pri"]
+tag = ["tag", "category", "label"]
+due = ["due", "deadline", "target"]
+
+[display]
+default_sort = "path"
+show_git_blame = true
+context_lines = 2
+auto_expand_priority = "high"
+stale_threshold_days = 365
+```
+
+### .trawl.toml format
+
+A `.trawl.toml` file in the repository root provides per-project
+overrides. Configuration is layered — later sources override earlier:
+
+```
+built-in defaults  →  ~/.config/trawl/config.toml  →  <repo>/.trawl.toml  →  CLI flags
+```
+
+**Merge semantics**:
+
+- Scalars (`max_file_size`, `only_tracked`, etc.) are **replaced** when
+  a layer provides them.
+- `exclude` and `include` **merge** (union, de-duplicated) across all
+  layers with the built-in defaults. A project that adds `exclude =
+  ["docs/"]` still skips `target/` without re-listing it.
+- `[tokens]` and `[headers]` **merge entry-by-entry**. Adding
+  `effort = "%"` retains all default tokens; adding `task = ["chapter"]`
+  to `[headers]` extends the default task keyword list.
+
+### When config is needed
+
+| Reason | Frequency | When to add |
+|--------|-----------|-------------|
+| **Header keyword registration** | Routine | A table column intended as a standard field (task, state, owner, priority, tag, due) uses a header keyword not in the default lists. Domain-specific vocabulary ("Chapter", "Paper", "Recipe") is legitimate — trawl should adapt via config, not require column renaming. |
+| **Section name registration** | Last resort | A non-standard heading name needs recognition. Prefer renaming the heading to match a default (`GOAL TRACKER` or `TODO`) unless the name carries domain meaning the user wants preserved. |
+| **Exclude paths** | When needed | Noise directories (`.agents/`, `vendor/`, test fixtures) contain marker patterns that interfere with scanning. |
+
+Omit `.trawl.toml` entirely when none of these conditions apply.
+
+Example — registering a domain-specific column header:
+
+```toml
+# .trawl.toml
+[headers]
+task = ["chapter"]    # extends the default list; "Chapter" columns now map to task
+```
+
+---
+
+## Verification
+
+How to confirm your goal trackers are trawl-compatible.
+
+### Compatibility checklist
+
+Ordered by pipeline stage — check each before moving to the next:
+
+**Detection**:
+
+- [ ] The file is git-tracked (`git ls-files <path>` shows it)
+- [ ] The file is not in a dot-directory (unless `scan_hidden = true`)
+- [ ] The file does not exceed `max_file_size`
+- [ ] The file is not in an excluded directory
+
+**Section**:
+
+- [ ] A heading in the file matches a `goal_section_names` entry (case-insensitive exact match)
+- [ ] No higher-level heading sits between the section and its items
+- [ ] Only one tracker section per file (first match wins)
+
+**Items**:
+
+- [ ] Items use `- [ ]` / `- [x]` (or `*`, `+`; checked char is `x`/`X`/`✓`)
+- [ ] Nesting uses 2-space indentation
+- [ ] Tables have a header row, a separator row (`|---|`), and at least one column whose header contains a task keyword
+- [ ] Table state cells follow the done heuristic (empty or "TODO" = not-done; anything else = done)
+
+**Metadata**:
+
+- [ ] Tokens are space-delimited (`!high @owner #tag ~date`)
+- [ ] `#tag` is for labels, `!priority` is for triage levels — never use `#high` for priority
+
+**Config**:
+
+- [ ] Every table column serving as a standard field contains a keyword from the appropriate default list (or is registered in `.trawl.toml`)
+- [ ] The file has a `# H1` title — otherwise trawl falls back to the filename
+
+**Verification**:
+
+- [ ] Run `trawl --path <dir> --no-tui` and confirm every expected goal appears with correct progress/status
+
+### Diagnosing missing goals
+
+If a goal does not appear in `trawl --no-tui` output, follow this
+decision tree:
+
+```
+Goal not visible?
+│
+├─ Is the file git-tracked?
+│  └─ No → git add the file, or set only_tracked = false
+│
+├─ Is the file in a dot-directory?
+│  └─ Yes → set scan_hidden = true, or move the file
+│
+├─ Is the file excluded?
+│  └─ Yes → remove the exclude pattern, or set include to whitelist it
+│
+├─ Does the file contain a matching section heading?
+│  └─ No → add a ## GOAL TRACKER or ## TODO section
+│  └─ Heading present but wrong name → check goal_section_names config
+│
+├─ Does the section contain checkbox items or tables?
+│  └─ No items → goal appears as "planned" (0%)
+│  └─ Tables only → check that at least one column maps to "task"
+│     └─ No task column → add keyword to headers.task in .trawl.toml
+│     └─ Or rename the column header to use a default task keyword
+│
+└─ Check trawl --no-tui output again
+```
