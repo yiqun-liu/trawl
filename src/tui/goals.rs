@@ -16,7 +16,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::{Goal, GoalItem, NodeState, Priority, Status};
+use crate::model::{BrokenReason, Goal, GoalItem, NodeState, Priority, Reference, Status};
 
 /// Which goal a row belongs to. Headers and milestones are foldable; tasks
 /// (leaves) are not.
@@ -132,6 +132,7 @@ fn collect_milestone_keys(item: &GoalItem, key: &str, out: &mut Vec<String>) {
 }
 
 /// Style for a goal item: high priority is red; a checked leaf is dimmed.
+/// Group nodes are never dimmed (they have no completion state of their own).
 fn item_style(item: &GoalItem) -> Style {
     if item.metadata.priority.as_ref() == Some(&Priority::High) {
         return Style::default().fg(Color::Red);
@@ -181,13 +182,6 @@ fn push_item(
     rows: &mut Vec<GoalRow>,
 ) {
     let indent = "  ".repeat(depth);
-    // Commit 1 (refactor): Group nodes render as if `[ ]` — no Group nodes
-    // are produced by the parser yet, so this branch is unreachable in
-    // practice. Commit 4 (TUI display) replaces this with proper rendering.
-    let check = match item.state {
-        NodeState::Checkbox { checked: true } => 'x',
-        _ => ' ',
-    };
     let style = item_style(item);
     let mut badges: Vec<String> = Vec::new();
     if let Some(p) = &item.metadata.priority {
@@ -219,32 +213,93 @@ fn push_item(
         String::new()
     };
 
-    if item.children.is_empty() {
-        // Leaf task: not foldable; remembers its parent so keys act on it.
+    // Cycle references are always rendered as a single non-foldable marker
+    // leaf, regardless of node state — they have no children (the resolver
+    // cleared them) and the chain is the diagnostic.
+    if let Some(Reference::Cycle { chain }) = &item.reference {
+        let chain_str = chain
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" → ");
         rows.push(GoalRow {
             kind: GoalRowKind::Task {
                 key: key.to_string(),
                 parent_key: parent_key.to_string(),
             },
-            text: format!("{indent}[{check}] {}{badge}{blame_info}", item.text),
+            text: format!("{indent}↻ (cycle: {chain_str})"),
+            style,
+        });
+        return;
+    }
+
+    // Reference glyph: `→` for resolved, `⚠` for broken, nothing for
+    // non-references. Pending should not occur after Pass 2 resolution.
+    let (ref_glyph, ref_suffix) = match &item.reference {
+        Some(Reference::Resolved { .. }) => ("→ ".to_string(), String::new()),
+        Some(Reference::Broken { raw_target, reason }) => {
+            let reason_str = match reason {
+                BrokenReason::NotFound => "not found",
+                BrokenReason::NotScanned => "not scanned",
+                BrokenReason::NoGoalTracker => "no goal tracker",
+            };
+            ("⚠ ".to_string(), format!("  ({reason_str}: {raw_target})"))
+        }
+        _ => (String::new(), String::new()),
+    };
+
+    if item.children.is_empty() {
+        // Leaf: not foldable. Render with or without checkbox depending on
+        // node state.
+        let body = match item.state {
+            NodeState::Checkbox { checked } => {
+                let check = if checked { 'x' } else { ' ' };
+                format!(
+                    "{indent}[{check}] {ref_glyph}{}{badge}{blame_info}{ref_suffix}",
+                    item.text
+                )
+            }
+            NodeState::Group => {
+                format!("{indent}{ref_glyph}{}{badge}{ref_suffix}", item.text)
+            }
+        };
+        rows.push(GoalRow {
+            kind: GoalRowKind::Task {
+                key: key.to_string(),
+                parent_key: parent_key.to_string(),
+            },
+            text: body,
             style,
         });
     } else {
-        // Milestone: foldable.  Append direct-children ratio.
-        let checked_children = item
-            .children
-            .iter()
-            .filter(|c| c.checked() == Some(true))
-            .count();
-        let total_children = item.children.len();
-        let ratio = format!("    {checked_children}/{total_children}");
+        // Internal node (checkbox milestone or group container): foldable.
+        // The direct-children ratio counts only checkbox children — all-group
+        // children would produce a misleading "0/0" otherwise.
+        let checkbox_children: Vec<&GoalItem> =
+            item.children.iter().filter(|c| c.is_checkbox()).collect();
+        let ratio = if !checkbox_children.is_empty() {
+            let checked = checkbox_children
+                .iter()
+                .filter(|c| c.checked() == Some(true))
+                .count();
+            format!("    {}/{}", checked, checkbox_children.len())
+        } else {
+            String::new()
+        };
         let marker = if expanded.contains(key) { '▼' } else { '▸' };
+        let check_str = match item.state {
+            NodeState::Checkbox { checked } => {
+                let check = if checked { 'x' } else { ' ' };
+                format!("[{check}] ")
+            }
+            NodeState::Group => String::new(),
+        };
         rows.push(GoalRow {
             kind: GoalRowKind::Milestone {
                 key: key.to_string(),
             },
             text: format!(
-                "{indent}{marker} [{check}] {}{badge}{ratio}{blame_info}",
+                "{indent}{marker} {check_str}{ref_glyph}{}{badge}{ratio}{blame_info}",
                 item.text
             ),
             style,
@@ -338,6 +393,28 @@ mod tests {
             blame_date: None,
             blame_commit: None,
         }
+    }
+
+    fn group(text: &str, children: Vec<GoalItem>) -> GoalItem {
+        GoalItem {
+            text: text.into(),
+            state: NodeState::Group,
+            metadata: Metadata::default(),
+            reference: None,
+            children,
+            span: Span {
+                path: PathBuf::from("x.md"),
+                line: 1,
+            },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
+        }
+    }
+
+    fn with_reference(mut item: GoalItem, reference: Reference) -> GoalItem {
+        item.reference = Some(reference);
+        item
     }
 
     #[test]
@@ -473,5 +550,152 @@ mod tests {
         assert_eq!(progress_bar(0), "----------");
         assert_eq!(progress_bar(50), "=====-----");
         assert_eq!(progress_bar(100), "==========");
+    }
+
+    #[test]
+    fn group_node_renders_without_checkbox() {
+        // A subsection-style group node has no [ ] / [x]; the title appears
+        // next to the fold chevron directly.
+        let goals = vec![goal(
+            "A",
+            vec![group(
+                "Foundations",
+                vec![leaf("task 1", true), leaf("task 2", false)],
+            )],
+        )];
+        let mut expanded = HashSet::new();
+        expanded.insert("g0".to_string());
+        let rows = flatten_goals(&goals, &expanded, false);
+        // header + group node only (children folded)
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows[1].text.contains("▸ Foundations"),
+            "group node renders without [ ]: {}",
+            rows[1].text
+        );
+        assert!(
+            !rows[1].text.contains("[]"),
+            "no empty checkbox bracket should appear: {}",
+            rows[1].text
+        );
+    }
+
+    #[test]
+    fn group_node_with_resolved_reference_shows_arrow_glyph() {
+        let item = with_reference(
+            group("Imported Goal", vec![leaf("a", true)]),
+            Reference::Resolved {
+                target_path: PathBuf::from("other.md"),
+                display_text: String::new(),
+            },
+        );
+        let goals = vec![goal("A", vec![item])];
+        let mut expanded = HashSet::new();
+        expanded.insert("g0".to_string());
+        let rows = flatten_goals(&goals, &expanded, false);
+        assert!(
+            rows[1].text.contains("→"),
+            "resolved reference shows → glyph: {}",
+            rows[1].text
+        );
+    }
+
+    #[test]
+    fn broken_reference_renders_warning_glyph_and_reason() {
+        let item = with_reference(
+            group("[[missing]]", Vec::new()),
+            Reference::Broken {
+                raw_target: "missing".into(),
+                reason: BrokenReason::NotFound,
+            },
+        );
+        let goals = vec![goal("A", vec![item])];
+        let mut expanded = HashSet::new();
+        expanded.insert("g0".to_string());
+        let rows = flatten_goals(&goals, &expanded, false);
+        // Broken ref is a leaf — header + leaf.
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows[1].text.contains("⚠"),
+            "broken ref shows ⚠: {}",
+            rows[1].text
+        );
+        assert!(
+            rows[1].text.contains("not found"),
+            "broken ref shows reason: {}",
+            rows[1].text
+        );
+    }
+
+    #[test]
+    fn cycle_reference_renders_marker_with_chain() {
+        let item = with_reference(
+            group("cycled", Vec::new()),
+            Reference::Cycle {
+                chain: vec![PathBuf::from("a.md"), PathBuf::from("b.md")],
+            },
+        );
+        let goals = vec![goal("A", vec![item])];
+        let mut expanded = HashSet::new();
+        expanded.insert("g0".to_string());
+        let rows = flatten_goals(&goals, &expanded, false);
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows[1].text.contains("↻"),
+            "cycle shows ↻ glyph: {}",
+            rows[1].text
+        );
+        assert!(
+            rows[1].text.contains("a.md"),
+            "cycle chain visible: {}",
+            rows[1].text
+        );
+    }
+
+    #[test]
+    fn ratio_counts_only_checkbox_children() {
+        // A group containing 1 checked leaf + 1 nested empty group must show
+        // ratio 1/1, not 1/2 — the empty group is a placeholder, not a task.
+        let goals = vec![goal(
+            "A",
+            vec![group(
+                "Subtree",
+                vec![leaf("done", true), group("Empty", Vec::new())],
+            )],
+        )];
+        let mut expanded = HashSet::new();
+        expanded.insert("g0".to_string());
+        let rows = flatten_goals(&goals, &expanded, false);
+        assert!(
+            rows[1].text.contains("1/1"),
+            "ratio counts checkbox children only: {}",
+            rows[1].text
+        );
+    }
+
+    #[test]
+    fn group_leaf_renders_as_non_foldable_task() {
+        // An empty subsection (group with no children) is not foldable.
+        let goals = vec![goal("A", vec![group("Empty Placeholder", Vec::new())])];
+        let mut expanded = HashSet::new();
+        expanded.insert("g0".to_string());
+        let rows = flatten_goals(&goals, &expanded, false);
+        assert_eq!(rows.len(), 2);
+        // The group leaf should NOT carry a chevron (▸/▼).
+        assert!(
+            !rows[1].text.contains('▸') && !rows[1].text.contains('▼'),
+            "group leaf is not foldable: {}",
+            rows[1].text
+        );
+        assert!(
+            rows[1].text.contains("Empty Placeholder"),
+            "group leaf shows its title: {}",
+            rows[1].text
+        );
+        // Carries the parent_key (goal header), like a Task.
+        assert!(matches!(
+            &rows[1].kind,
+            GoalRowKind::Task { parent_key, .. } if parent_key == "g0"
+        ));
     }
 }
