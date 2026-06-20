@@ -105,18 +105,20 @@ Some intro text.                    ← ignored
 
 ### Content Within the Section
 
-Within the GOAL TRACKER section, the parser recognizes **only** two
-element types:
+Within the GOAL TRACKER section, the parser recognizes **four** element
+types:
 
 | Element | Syntax | Parsed as |
 |---------|--------|-----------|
-| Checkbox item | `- [x]` or `- [ ]` (at any indent) | Task node in the checkbox tree |
+| Checkbox item | `- [x]` or `- [ ]` (at any indent) | Checkbox node in the tree (task or milestone, depending on children) |
+| Plain bullet | `- text` (no checkbox) | **Group node** if it has indented children; ignored otherwise (preserves context-note behavior) |
+| Subsection heading | `### title` (any level deeper than the section) | **Group node**; items beneath it become its children |
+| Reference | `[[target]]` or `[text](target)` on its own or inside a checkbox/bullet | Node carrying a `Reference`; resolved into a subtree of the target doc in Pass 2 |
 | Table | `\| ... \|` with separator row | Task table (see Table Format) |
 
-**Everything else is ignored** — including headings (`###`, `####`),
-paragraphs, plain bullets, images, code blocks, and blank lines. This
-lets users mix context notes and visual formatting with structured
-tracking freely.
+**Everything else is ignored** — including paragraphs, images, code blocks,
+and blank lines. Headings at the **same or higher level** than the section
+end the section (and are therefore outside it).
 
 ### Checkbox Tree (List Format)
 
@@ -131,8 +133,8 @@ position:
 - A checkbox item **without children** = **task**
 - Deeper nesting creates sub-tasks naturally
 
-`###` and other headings within the section are visual formatting only —
-ignored by the parser.
+Plain bullets and subsection headings (see [Group Nodes](#group-nodes))
+introduce additional internal node types alongside checkbox milestones.
 
 #### Grammar
 
@@ -157,18 +159,23 @@ ignored_line     ::= any line not matching node
 #### Progress Calculation
 
 All levels use **leaf ratio** — the ratio of done leaf tasks to total
-leaf tasks within the scope:
+leaf tasks within the scope. A "leaf" is a node with no children **and**
+a checkbox state; **group leaves** (empty subsections, broken references,
+cycle markers) do **not** count toward total or done:
 
 ```
-task (no children):     progress = 1 if [x], else 0
-milestone (has children): progress = count(done leaf tasks in subtree) / count(all leaf tasks in subtree)
-goal:                   progress = count(done leaf tasks) / count(all leaf tasks)
+task (no children):          progress = 1 if [x], else 0
+milestone (has children):    progress = count(done checkbox leaves in subtree)
+                                       / count(all checkbox leaves in subtree)
+group node (has children):   same formula as milestone
+group leaf (no children):    does not count — invisible to progress
+goal:                        progress = count(done checkbox leaves) / count(all checkbox leaves)
 ```
 
-**Zero leaf tasks:** if a scope contains no leaf tasks (an empty section,
-or only milestones with no tasks beneath them), progress is `0%` and no
-division is performed. This avoids division by zero; the scope reports
-status `planned` (see Derived Fields).
+**Zero checkbox leaves:** if a scope contains no checkbox leaves (an empty
+section, only milestones with no tasks beneath them, or only group nodes),
+progress is `0%` and no division is performed. This avoids division by
+zero; the scope reports status `planned` (see Derived Fields).
 
 A milestone's own checkbox state is independent of its children — the
 user controls it manually. The TUI shows both the checkbox state and
@@ -304,9 +311,11 @@ Status: active
 
 ### Mixed Format
 
-Checkbox lists and tables can be freely mixed within the same GOAL
-TRACKER section. Headings (`###`, etc.) may be used for visual
-separation but are ignored by the parser:
+Checkbox lists, group nodes, references, and tables can be freely mixed
+within the same GOAL TRACKER section. Headings (`###`, etc.) **inside**
+the section are structural — they become group nodes whose children are
+the items beneath them. Headings at the **same or higher** level than
+the section end the section.
 
 ```markdown
 ## GOAL TRACKER
@@ -325,17 +334,165 @@ separation but are ignored by the parser:
 | x | web server | ch 20 |
 ```
 
-The `###` headings are ignored — they serve as visual cues for the human
-reader. The parser sees five tasks: three from the checkbox list and two
-from the table.
+The `### Foundations` and `### Practice Projects` headings become group
+nodes — the parser sees a goal with two top-level items, each owning its
+checkbox children or table rows.
+
+### Group Nodes
+
+A **group node** is a named container without a checkbox. It carries a
+title and may have child items, but it has no `[ ]` / `[x]` state of
+its own. Group nodes come from three sources:
+
+| Source | Syntax | Notes |
+|--------|--------|-------|
+| Subsection heading | `### Title` (level deeper than section) | Always retained, even when a heading immediately follows (a planned placeholder). |
+| Plain bullet with children | `- Group` followed by indented items | Becomes a group node; nested indentation defines its subtree. |
+| Plain bullet without children | `- just a note` | **Ignored** — preserved context-note behavior. |
+| Reference line | `[[target]]` or `[Link](target)` | Always a group node; resolved into a subtree in Pass 2. |
+
+**Subsection nesting.** A heading at relative level *k* (heading level
+minus section level) becomes a child of the most recent heading at level
+< *k*. A `####` inside a `###` nests one level deeper. A `###` after a
+`####` pops back to top-level.
+
+**Indent reset.** A heading **closes any open checkbox indentation
+context**. Items after the heading form a fresh indentation tree rooted
+at that heading — they are not children of the prior checkbox parent.
+
+```markdown
+## GOAL TRACKER
+
+- [ ] Pre-section task          ← top-level (root of goal)
+
+### Phase 1                     ← group node (top-level)
+
+- [ ] Task A                    ← child of "Phase 1", not "Pre-section task"
+  - [ ] Sub-task                ← child of "Task A"
+
+#### Sub-area                   ← group node, child of "Phase 1"
+
+- [ ] Deep task                 ← child of "Sub-area"
+
+### Phase 2                     ← group node (top-level, sibling of Phase 1)
+```
+
+Parsed tree:
+
+```
+Goal
+├── [ ] Pre-section task
+├── Phase 1 (group)
+│   ├── [ ] Task A
+│   │   └── [ ] Sub-task
+│   └── Sub-area (group)
+│       └── [ ] Deep task
+└── Phase 2 (group)
+```
+
+A group node carries its own metadata tokens (e.g., `### Phase 1 !high`)
+which apply to the group itself, not its children.
+
+### Cross-Document References
+
+A **reference** lets one goal tracker pull in another doc's tracker as
+a subtree. The reference line becomes the subtree root; the referenced
+doc's items become its children.
+
+#### Syntax
+
+Two reference forms are recognized, matching common PKM conventions:
+
+| Form | Syntax | Resolves to |
+|------|--------|-------------|
+| Wikilink | `[[target]]` | Subtree rooted at the line; node text is filled from the target's H1 title. |
+| Markdown link | `[display](target)` | Subtree rooted at the line; node text is the `display` text. |
+
+A reference may appear:
+
+- **Inside a checkbox item**: `- [ ] [[target]]` — the checkbox state
+  applies to the imported subtree as a milestone state.
+- **Inside a plain bullet**: `- [[target]]` — becomes a group node.
+- **As a standalone line**: `[[target]]` (no bullet) — becomes a group
+  node at the current indentation level.
+
+Embedded references (e.g., `- [ ] see [[x]] for details`) are **not**
+treated as structural — the link stays as literal text. Only
+line-as-reference is meaningful.
+
+#### Path resolution
+
+Reference targets resolve **relative to the referencing doc's
+directory**, matching how markdown links work in renderers. A reference
+in `ml/llm/cs146s/README.md` writing `[[overview/plan]]` resolves to
+`ml/llm/cs146s/overview/plan.md`.
+
+- An optional `#anchor` may be appended (`[[doc#section]]`); it is
+  stripped before resolution. Whole-doc inlining is performed today;
+  section-level resolution is future work.
+- If the target has no extension, `.md` is appended automatically.
+- Path keys normalize backslashes to forward slashes for cross-platform
+  comparison.
+
+#### Resolution outcomes
+
+After parsing all goals (Pass 1), a second pass walks each tree and
+converts each `Pending` reference into one of:
+
+| Outcome | Condition | Display |
+|---------|-----------|---------|
+| **Resolved** | Target path is in the goal map | The target's items become children of the referencing node. |
+| **Broken: NotFound** | Target path is not in the scan set | Rendered with `⚠ (not found: target)`; no children. |
+| **Broken: NoGoalTracker** | Target was scanned but has no tracker | Rendered with `⚠ (no goal tracker: target)`; no children. |
+| **Cycle** | Target is already on the active expansion chain | Rendered with `↻ (cycle: a → b → a)`; expansion stops. |
+
+A goal may be referenced from multiple parents (a diamond); each
+expansion gets its own deep-cloned copy. Every goal tracker is also
+shown top-level in the dashboard — references add additional nested
+views, they never replace the source.
+
+#### Example
+
+```markdown
+<!-- ml/llm/README.md -->
+# ML Learning Track
+
+## GOAL TRACKER
+
+- [x] Set up environment
+- [ ] [[foundations/README]]
+- [ ] [[advanced/README]]
+```
+
+```markdown
+<!-- ml/llm/foundations/README.md -->
+# Foundations
+
+## GOAL TRACKER
+
+- [x] Transformer architecture
+- [ ] Attention mechanics
+```
+
+After resolution, the `ml/llm/README.md` goal contains:
+
+```
+ML Learning Track
+├── [x] Set up environment
+├── [ ] Foundations               ← from [[foundations/README]]
+│   ├── [x] Transformer architecture
+│   └── [ ] Attention mechanics
+└── [ ] Advanced                  ← from [[advanced/README]]
+    └── …
+```
 
 ### Derived Fields
 
 | Field | Derivation | Example |
 |-------|-----------|---------|
 | Title | First `#` H1 in the file. Fallback: filename without extension. | "Complete CS146s-2025" |
-| Progress | `count(done leaf tasks) / count(all leaf tasks) * 100`; `0%` when there are no leaf tasks. | 40% |
-| Status | `completed` if progress = 100%. `active` if 0 < progress < 100%. `planned` if progress = 0% (including goals with no leaf tasks). | active |
+| Progress | `count(done checkbox leaves) / count(all checkbox leaves) * 100`; `0%` when there are no checkbox leaves. Group leaves do not count. | 40% |
+| Status | `completed` if progress = 100%. `active` if 0 < progress < 100%. `planned` if progress = 0% (including goals with no checkbox leaves). | active |
 
 No manual metadata fields are required. Everything is auto-derived.
 
@@ -470,12 +627,14 @@ TODO: add examples for cache types #arch
 
 The following are explicitly **out of scope**:
 
-- **File references**: no `[[wikilink]]` or `→ file.md` syntax. Goals
-  and inline tasks are independent peers, not linked by file references.
 - **Frontmatter / YAML metadata**: no `---` blocks. Goal metadata is
   derived from the markdown structure itself.
 - **Lifecycle states** (`in-progress`, `blocked`, `wontfix`): inline
   tasks are binary (exist or removed). Goal tasks use the done heuristic.
+- **Embedded references as structural**: `see [[x]] for details` inside a
+  line is treated as literal text. Only line-as-reference is structural.
+- **Section-level reference resolution**: `[[doc#section]]` resolves to
+  the whole doc today; targeting a specific subsection is future work.
 - **Nested tasks within a single comment block**: each line is parsed
   independently.
 - **Tasks in compiled output** (`.o`, `.exe`, `.class`): binary files are

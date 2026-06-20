@@ -86,11 +86,38 @@ are orphan — minor tasks with no associated goal. Many goals have no
 inline tasks in their directory. The tool does **not** assume a structural
 parent-child relationship between them.
 
-The only cross-reference is an **optional proximity filter**: when viewing
-a goal, the user can optionally ask "show inline tasks in this goal's
-directory." This is a convenience filter, not a structural link. Directory
-structure does not reliably map to goal scope, and the tool never assumes
-it does.
+Note: this principle concerns **goal-to-inline-task** relationships.
+**Goal-to-goal** hierarchy via cross-document references is a separate
+feature (see [Cross-Document References](#cross-document-references-hierarchical-goals))
+and is fully supported.
+
+The only cross-reference to inline tasks is an **optional proximity
+filter**: when viewing a goal, the user can optionally ask "show inline
+tasks in this goal's directory." This is a convenience filter, not a
+structural link. Directory structure does not reliably map to goal scope,
+and the tool never assumes it does.
+
+### Cross-Document References (Hierarchical Goals)
+
+A goal tracker can pull in another doc's tracker as a subtree via
+`[[wikilink]]` or `[display](path)` markdown-link references. The
+reference line becomes the subtree root; the referenced doc's items
+become its children. This lets multi-file objectives (a learning track
+spread across `README.md` plus per-chapter notes, or an epic spread
+across multiple planning docs) aggregate into a single tree.
+
+| Property | Behavior |
+|----------|----------|
+| Syntax | `[[target]]` (wikilink) or `[display](target)` (markdown link) |
+| Placement | Inside a checkbox, plain bullet, or standalone line |
+| Path resolution | Relative to the referencing doc's directory |
+| Recursion | Linear chains of any length; cycles detected and rendered as markers |
+| Broken refs | Missing file → `⚠ not found`; scanned file with no tracker → `⚠ no goal tracker` |
+| Diamond refs | Each appearance gets its own deep-cloned copy |
+| Top-level display | Every tracker is still shown top-level in the dashboard — references add nested views, never replace |
+
+> Full syntax specification: see [syntax.md](syntax.md) → Cross-Document
+> References
 
 ## Goal Tracker
 
@@ -122,9 +149,18 @@ The checkbox tree *is* the hierarchy. No special markers needed:
 - A checkbox item **without children** = **task**
 - Deeper nesting creates sub-tasks naturally
 
-`###` and other headings within the GOAL TRACKER section are treated as
-visual formatting — ignored by the parser, just like any other
-non-checkbox content.
+Two additional internal-node types are recognized alongside checkbox
+milestones:
+
+- **Group nodes** from subsection headings (`### Title` inside the
+  section) and plain bullets with children (`- Group`). A group node has
+  no checkbox of its own; it is a named container.
+- **Reference roots** from `[[wikilink]]` / `[display](target)` lines,
+  which become group nodes whose children are the referenced doc's items.
+
+`###` and other headings **inside** the section are structural — they
+become group nodes. Headings at the **same or higher level** than the
+section end it.
 
 ### Key Properties
 

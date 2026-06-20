@@ -26,7 +26,8 @@ This project is licensed under MIT OR Apache-2.0. See `LICENSE-MIT` and
 - **Scanner**: `.gitignore`-aware recursive walker with ripgrep-class
   pattern matching and parallel file reading
 - **Goal Tracker Parser**: parses `## GOAL TRACKER` markdown sections into
-  hierarchical checkbox trees and task tables
+  hierarchical checkbox trees, task tables, structural subsections, and
+  cross-document references
 - **Inline Task Parser**: extracts `TODO`/`FIXME`/`HACK`/etc. markers from
   any text file, with metadata token support (`@owner`, `#tag`,
   `!priority`, `~due`)

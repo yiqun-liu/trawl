@@ -27,6 +27,8 @@ For syntax specification, see `docs/syntax.md`.
 | Git Blame Enrichment | 3 | Author/date/commit hash per inline task |
 | Stale Detection | 3 | Age-based flagging with configurable threshold |
 | Stats Dashboard | 3 | Aggregate statistics with bar charts, top directories |
+| Group Nodes | 4 | Subsection headings and plain-bullet groups as checkboxless containers |
+| Cross-Document References | 4 | `[[wikilink]]` / `[md](link)` compose goal trackers across files |
 
 ## GOAL TRACKER
 
@@ -155,6 +157,28 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Calculate top directories by task count
   - [ ] Render bar charts in TUI
   - [x] Add `S` keybinding to toggle stats view
+
+### Phase 4 — Hierarchical Goals
+
+- [x] Group Nodes
+  - [x] Extend `GoalItem` model with `NodeState` (Group / Checkbox) and orthogonal `Reference` field
+  - [x] Refine leaf-ratio progress to exclude group leaves
+  - [x] Migrate all call sites and tests to the new model
+- [x] Structural Subsections
+  - [x] Parse `###`+ headings inside the section as group nodes
+  - [x] Nest by relative heading level; reset indent context on heading
+  - [x] Plain bullets with children become group nodes; without children they stay ignored
+- [x] Cross-Document References
+  - [x] Detect `[[wikilink]]` and `[display](md-link)` forms in checkbox/bullet/standalone lines
+  - [x] Pass 2 resolver: convert Pending → Resolved / Broken / Cycle
+  - [x] Path resolution relative to referencing doc; anchor stripping; cross-platform key normalization
+  - [x] Cycle detection via active expansion chain; broken-ref reason classification
+- [x] TUI Display
+  - [x] Render group nodes without `[ ]`
+  - [x] Render resolved references with `→` glyph
+  - [x] Render broken references with `⚠` glyph and reason
+  - [x] Render cycle markers with `↻` glyph and chain
+  - [x] Direct-children ratio counts only checkbox children
 
 ## Details
 

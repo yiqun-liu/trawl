@@ -104,23 +104,27 @@ is parsed:
 
 What format trawl parses inside a detected section.
 
-Within the tracker section, trawl recognizes **only two element types**:
-checkbox items and tables. Everything else — headings (`###`, `####`),
-paragraphs, plain bullets, images, code blocks, and blank lines — is
-ignored. This lets you mix context notes and visual formatting freely.
+Within the tracker section, trawl recognizes **four element types**:
+checkbox items, plain bullets (with children), subsection headings, and
+references (wikilinks or markdown links). Each contributes a different
+kind of tree node. Paragraphs, images, code blocks, and blank lines are
+ignored — letting you mix context notes and visual formatting freely.
 
 ### Choosing a format
 
 | Format | Best for | Trade-offs |
 |--------|----------|------------|
 | **Checkbox list** | Simple tracking, hierarchical goals (courses, book chapters, multi-phase projects) | Naturally expresses milestones → tasks via indentation. Lightweight — one line per item. Metadata tokens are inline. |
+| **Subsection headings** | Grouping large trackers into named phases | `### Title` becomes a group node (no checkbox) that owns the items beneath it. Heading level relative to the section determines nesting; a heading resets indentation context. |
+| **Plain-bullet groups** | Milestones without a `[ ]` state | `- Group` followed by indented children becomes a group node. Plain bullets without children are ignored — they stay as context notes. |
+| **Cross-document reference** | Multi-file objectives (epic across planning docs, learning track across chapter notes) | `[[target]]` or `[display](target)` pulls in another doc's tracker as a subtree. See [Cross-Document References](#cross-document-references). |
 | **Table** | Rich information per item (status, owner, priority, due, custom fields) | Compact for flat task lists with multiple columns. Each row is a **leaf task** — no milestone/task distinction. Hierarchy can be approximated by adding a `Level` or `Phase` column for the human reader, but trawl still treats every row as a flat leaf. |
-| **Mixed** | Both hierarchical structure and dense per-group metadata | Use checkboxes for the hierarchy, tables for groups that need per-item columns. `###` headings between groups are decorative — ignored by trawl but useful for visual separation. |
+| **Mixed** | Both hierarchical structure and dense per-group metadata | Use checkboxes for the hierarchy, tables for groups that need per-item columns. Subsection headings between groups are structural. |
 
-**Guideline**: start with checkboxes. Switch to tables (or mixed) when
-each item carries more than one tracked attribute beyond the task name
-itself. A flat topic list does not need a table; a list where every item
-has a status, an owner, and a deadline does.
+**Guideline**: start with checkboxes. Add subsections when the tracker
+grows past a dozen items. Use cross-document references when an objective
+spans multiple files. Switch to tables when each item carries more than
+one tracked attribute beyond the task name itself.
 
 ### Checkbox items
 
@@ -150,10 +154,12 @@ has a status, an owner, and a deadline does.
 - [ ] Buy textbook
 ```
 
-`###` and other headings within the section are **decorative** — ignored
-by trawl's parser. They organize content for the human reader only; all
-checkbox items are parsed as a single flat sequence regardless of any
-internal headings.
+`###` and other headings **inside** the section are **structural** —
+they become group nodes whose children are the items beneath them. The
+heading level relative to the section determines nesting: `####` inside
+`###` nests one level deeper. A heading **closes any open checkbox
+indentation context**, so items after it become children of the heading,
+not of the prior checkbox parent.
 
 ### Tables
 
@@ -216,9 +222,9 @@ Parsed as:
 
 ### Mixed format
 
-Checkbox lists and tables can be freely mixed within the same section.
-`###` headings may be used for visual separation but are ignored by the
-parser:
+Checkbox lists, group nodes, references, and tables can be freely mixed
+within the same section. `###` headings are **structural** — they group
+the items beneath them:
 
 ```markdown
 ## GOAL TRACKER
@@ -229,7 +235,7 @@ parser:
 - [x] Chapter 2: Language Basics
 - [ ] Chapter 3: Data Structures !high
 
-### Practice Projects
+### Practice projects
 
 | Done | Project | Notes |
 |------|---------|-------|
@@ -237,8 +243,41 @@ parser:
 | x | file converter | part 5 |
 ```
 
-The parser sees five tasks: three from the checkbox list and two from
-the table.
+The parser produces a goal with two top-level group nodes (Fundamentals,
+Practice projects), each owning its three checkbox children or two table
+rows.
+
+### Cross-document references
+
+A `[[target]]` or `[display](target)` line inside a tracker pulls in
+another doc's tracker as a subtree. The reference line becomes the
+subtree root; the referenced doc's items become its children.
+
+```markdown
+<!-- ml/llm/README.md -->
+# ML Learning Track
+
+## GOAL TRACKER
+
+- [x] Set up environment
+- [ ] [[foundations/README]]
+- [ ] [[advanced/README]]
+```
+
+The reference resolves relative to the referencing doc's directory
+(`ml/llm/foundations/README.md` here). Optional `#anchor` suffixes are
+stripped before resolution — whole-doc inlining is performed today.
+
+| Outcome | Trigger | What the user sees |
+|---------|---------|---------------------|
+| **Resolved** | Target has a goal tracker | Imported subtree under the reference line. Text comes from the target's H1 (wikilink) or the link display text (markdown link). |
+| **Broken: not found** | Target file is not in the scan set | `⚠ (not found: target)` leaf — no subtree. |
+| **Broken: no goal tracker** | Target was scanned but has no tracker | `⚠ (no goal tracker: target)` leaf — no subtree. |
+| **Cycle** | Target is already on the expansion chain (A → B → A) | `↻ (cycle: a → b → a)` leaf — expansion stops. |
+
+The dashboard still shows every tracker top-level — references add
+nested views; they never replace the source. A goal may be referenced
+from multiple parents (a diamond); each gets its own deep-cloned copy.
 
 ---
 
@@ -482,8 +521,17 @@ Ordered by pipeline stage — check each before moving to the next:
 
 - [ ] Items use `- [ ]` / `- [x]` (or `*`, `+`; checked char is `x`/`X`/`✓`)
 - [ ] Nesting uses 2-space indentation
+- [ ] Subsection headings (`###`) inside the section become group nodes — verify nesting by relative heading level
+- [ ] Plain bullets (`- text`) with children become group nodes; without children they are ignored
 - [ ] Tables have a header row, a separator row (`|---|`), and at least one column whose header contains a task keyword
 - [ ] Table state cells follow the done heuristic (empty or "TODO" = not-done; anything else = done)
+
+**References** (if used):
+
+- [ ] Reference lines are line-as-reference (`- [ ] [[target]]` or standalone `[[target]]`) — embedded refs like `"see [[x]] for details"` stay literal
+- [ ] Targets resolve relative to the referencing doc's directory
+- [ ] Targets end in `.md` (or omit the extension — trawl appends it)
+- [ ] Broken refs render with `⚠`; cycles render with `↻` — both are visible in `--no-tui` output
 
 **Metadata**:
 
