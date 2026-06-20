@@ -26,7 +26,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::model::{Goal, GoalItem, InlineTask, Status};
+use crate::model::{Goal, GoalItem, InlineTask, NodeState, Status};
 use crate::ScanResult;
 
 mod filter;
@@ -775,7 +775,9 @@ impl App {
                 return;
             }
             if let Some(item) = goal_item_mut(&mut self.goals, gi, &path) {
-                item.checked = !item.checked;
+                if let NodeState::Checkbox { checked } = &mut item.state {
+                    *checked = !*checked;
+                }
             }
             self.rebuild_active();
             return;
@@ -834,7 +836,9 @@ impl App {
         }
 
         if let Some(item) = goal_item_mut(&mut self.goals, target.gi, &target.path) {
-            item.checked = crate::parser::goal::done_heuristic(&new_value);
+            item.state = NodeState::Checkbox {
+                checked: crate::parser::goal::done_heuristic(&new_value),
+            };
         }
         self.rebuild_active();
     }
@@ -1222,9 +1226,12 @@ fn item_leaf_counts(item: &GoalItem) -> (usize, usize) {
 
 fn count_item_leaves(item: &GoalItem, total: &mut usize, done: &mut usize) {
     if item.children.is_empty() {
-        *total += 1;
-        if item.checked {
-            *done += 1;
+        // Count only checkbox leaves; group leaves are planned placeholders.
+        if let NodeState::Checkbox { checked } = item.state {
+            *total += 1;
+            if checked {
+                *done += 1;
+            }
         }
     } else {
         for child in &item.children {
@@ -1233,10 +1240,10 @@ fn count_item_leaves(item: &GoalItem, total: &mut usize, done: &mut usize) {
     }
 }
 
-/// A milestone is "done" when it is itself checked and all its leaves are
-/// checked.
+/// A milestone is "done" when it is itself checked and all its checkbox
+/// leaves are checked. Group nodes are never "done" (no checkbox state).
 fn subtree_done(item: &GoalItem) -> bool {
-    if !item.checked {
+    if item.checked() != Some(true) {
         return false;
     }
     let (total, done) = item_leaf_counts(item);
@@ -1300,14 +1307,15 @@ fn resolve_editor() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Metadata, Span};
+    use crate::model::{Metadata, NodeState, Span};
     use std::path::PathBuf;
 
     fn leaf(text: &str, checked: bool) -> GoalItem {
         GoalItem {
             text: text.into(),
-            checked,
+            state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
+            reference: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from("x.md"),
@@ -1322,8 +1330,9 @@ mod tests {
     fn milestone(text: &str, checked: bool, children: Vec<GoalItem>) -> GoalItem {
         GoalItem {
             text: text.into(),
-            checked,
+            state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
+            reference: None,
             children,
             span: Span {
                 path: PathBuf::from("x.md"),

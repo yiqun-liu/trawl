@@ -18,7 +18,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 pub use config::Config;
-pub use model::{Goal, GoalItem, InlineTask, Metadata, Priority, Span, Status};
+pub use model::{
+    BrokenReason, Goal, GoalItem, InlineTask, Metadata, NodeState, Priority, Reference, Span,
+    Status,
+};
 pub use parser::ParseContext;
 pub use scanner::{FileContents, ScanOptions};
 

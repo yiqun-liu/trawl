@@ -34,9 +34,9 @@ fn parses_fixture_goal() {
     // Table rows become flat leaves; state column drives the done heuristic.
     let rows = &goal.items[2..];
     assert_eq!(rows.len(), 3);
-    assert!(!rows[0].checked, "TODO state is not done");
-    assert!(rows[1].checked, "done state is done");
-    assert!(!rows[2].checked, "empty state is not done");
+    assert!(!rows[0].checked().unwrap(), "TODO state is not done");
+    assert!(rows[1].checked().unwrap(), "done state is done");
+    assert!(!rows[2].checked().unwrap(), "empty state is not done");
     assert_eq!(rows[0].metadata.priority, Some(Priority::High));
     assert_eq!(rows[1].metadata.owner.as_deref(), Some("bob"));
 }

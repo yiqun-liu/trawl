@@ -109,15 +109,80 @@ impl InlineTask {
     }
 }
 
-/// One checkbox node or one table row in a goal tracker.
+/// The structural kind of a [`GoalItem`]. Determines checkbox rendering and
+/// whether the node participates in leaf-ratio progress.
 ///
-/// A node with no children is a *task*; a node with children is a
-/// *milestone*. The distinction is structural, not lexical.
+/// - [`NodeState::Checkbox`] covers both leaf tasks (`- [ ] task`) and
+///   checkbox milestones (`- [x] Week 1` with children). The `checked` value
+///   is user-controlled and independent of children, preserving the
+///   "milestone checkbox independence" rule.
+/// - [`NodeState::Group`] covers named containers that have no checkbox:
+///   subsection headings (`### Title`), plain bullets with children
+///   (`- Group` followed by indented items), and reference roots. A group
+///   node has no `[ ]` / `[x]` state of its own and never counts toward
+///   leaf-ratio progress.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeState {
+    /// Named container without a checkbox.
+    Group,
+    /// Checkbox-bearing node. `checked` is independent of children.
+    Checkbox { checked: bool },
+}
+
+/// Cross-document reference attached to a [`GoalItem`]. Set by Pass 1 of the
+/// goal parser as [`Reference::Pending`]; converted to one of the resolved
+/// variants by the Pass 2 resolver (`parser::resolve`).
+#[derive(Debug, Clone)]
+pub enum Reference {
+    /// Pass 1 form. The resolver rewrites this into one of the other
+    /// variants. `raw_target` is the path text as written in the source;
+    /// `display_text` is the link text for `[display](target)` markdown
+    /// links, or empty for `[[target]]` wikilinks.
+    Pending {
+        raw_target: String,
+        display_text: String,
+    },
+    /// Resolver success. The referenced doc's items are attached as children
+    /// of the carrying [`GoalItem`].
+    Resolved {
+        target_path: PathBuf,
+        display_text: String,
+    },
+    /// Target not found / not scanned / has no goal tracker.
+    Broken {
+        raw_target: String,
+        reason: BrokenReason,
+    },
+    /// Cycle detected while expanding. `chain` is the active path stack at
+    /// the point of detection, for diagnostics.
+    Cycle { chain: Vec<PathBuf> },
+}
+
+/// Why a [`Reference::Broken`] reference could not be resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokenReason {
+    /// File does not exist on disk.
+    NotFound,
+    /// File exists but was not scanned (excluded, binary, etc.).
+    NotScanned,
+    /// File was scanned but has no goal tracker section.
+    NoGoalTracker,
+}
+
+/// One node in a goal tracker tree.
+///
+/// A node with no children is a *task* (if [`NodeState::Checkbox`]) or a
+/// *planned placeholder* (if [`NodeState::Group`]); a node with children is
+/// a *milestone* or nested container. The distinction is structural, not
+/// lexical.
 #[derive(Debug, Clone)]
 pub struct GoalItem {
     pub text: String,
-    pub checked: bool,
+    pub state: NodeState,
     pub metadata: Metadata,
+    /// Cross-document reference, if this node originated from a `[[...]]`
+    /// wikilink or `[text](path)` markdown link. `None` for normal nodes.
+    pub reference: Option<Reference>,
     pub children: Vec<GoalItem>,
     pub span: Span,
     pub blame_author: Option<String>,
@@ -134,6 +199,25 @@ impl GoalItem {
     /// A task is any item with no children.
     pub fn is_task(&self) -> bool {
         self.children.is_empty()
+    }
+
+    /// `Some(true)` if this node is a checked checkbox, `Some(false)` if an
+    /// unchecked checkbox, `None` if it is a group node (no checkbox).
+    pub fn checked(&self) -> Option<bool> {
+        match self.state {
+            NodeState::Checkbox { checked } => Some(checked),
+            NodeState::Group => None,
+        }
+    }
+
+    /// True if this node has a `[ ]` / `[x]` checkbox.
+    pub fn is_checkbox(&self) -> bool {
+        matches!(self.state, NodeState::Checkbox { .. })
+    }
+
+    /// True if this node is a named container without a checkbox.
+    pub fn is_group(&self) -> bool {
+        matches!(self.state, NodeState::Group)
     }
 }
 
@@ -165,7 +249,9 @@ impl Goal {
     }
 }
 
-/// Count `(total_leaf, done_leaf)` across a forest of items.
+/// Count `(total_leaf, done_leaf)` across a forest of items. Only checkbox
+/// leaves participate — group leaves (empty subsection, broken reference,
+/// cycle marker) are planned placeholders and do not affect progress.
 fn leaf_counts(items: &[GoalItem]) -> (usize, usize) {
     let mut total = 0usize;
     let mut done = 0usize;
@@ -177,9 +263,12 @@ fn leaf_counts(items: &[GoalItem]) -> (usize, usize) {
 
 fn count_leaves(item: &GoalItem, total: &mut usize, done: &mut usize) {
     if item.children.is_empty() {
-        *total += 1;
-        if item.checked {
-            *done += 1;
+        // Leaf: count only if it carries a checkbox.
+        if let NodeState::Checkbox { checked } = item.state {
+            *total += 1;
+            if checked {
+                *done += 1;
+            }
         }
     } else {
         for child in &item.children {
@@ -217,8 +306,9 @@ mod tests {
     fn task(text: &str, checked: bool) -> GoalItem {
         GoalItem {
             text: text.into(),
-            checked,
+            state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
+            reference: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from("x.md"),
@@ -233,8 +323,9 @@ mod tests {
     fn milestone(text: &str, checked: bool, children: Vec<GoalItem>) -> GoalItem {
         GoalItem {
             text: text.into(),
-            checked,
+            state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
+            reference: None,
             children,
             span: Span {
                 path: PathBuf::from("x.md"),

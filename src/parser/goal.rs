@@ -12,7 +12,7 @@ use chrono::NaiveDate;
 use regex::Regex;
 
 use crate::metadata;
-use crate::model::{Goal, GoalItem, Metadata, Priority, Span};
+use crate::model::{Goal, GoalItem, Metadata, NodeState, Priority, Span};
 use crate::parser::ParseContext;
 
 /// Parse a file's contents into a [`Goal`], if it contains a goal section.
@@ -83,8 +83,9 @@ fn parse_body(body: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> Vec<Goa
             let (desc, metadata) = metadata::extract(caps[3].trim(), ctx.tokens());
             let item = GoalItem {
                 text: desc,
-                checked,
+                state: NodeState::Checkbox { checked },
                 metadata,
+                reference: None,
                 children: Vec::new(),
                 span: Span {
                     path: PathBuf::from(rel),
@@ -180,8 +181,9 @@ fn parse_table(block: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> (usiz
         let (text, checked, metadata) = build_row(&cells, &header, &colmap, ctx);
         items.push(GoalItem {
             text,
-            checked,
+            state: NodeState::Checkbox { checked },
             metadata,
+            reference: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from(rel),
@@ -418,8 +420,8 @@ mod tests {
         let md = "## GOAL TRACKER\n\n| Task | State | Priority |\n|------|-------|----------|\n| OAuth flow | TODO | high |\n| Token refresh | done | med |\n";
         let goal = parse(md, Path::new("sprint/plan.md"), &ctx()).unwrap();
         assert_eq!(goal.items.len(), 2);
-        assert!(!goal.items[0].checked); // "TODO" => not done
-        assert!(goal.items[1].checked); // "done" => done
+        assert!(!goal.items[0].checked().unwrap(), "TODO state is not done");
+        assert!(goal.items[1].checked().unwrap(), "done state is done");
         assert_eq!(goal.items[0].metadata.priority, Some(Priority::High));
     }
 
@@ -489,8 +491,8 @@ mod tests {
     fn checkbox_state_characters() {
         let md = "## GOAL TRACKER\n\n- [x] a\n- [ ] b\n- [X] c\n";
         let goal = parse(md, Path::new("x.md"), &ctx()).unwrap();
-        let states: Vec<bool> = goal.items.iter().map(|i| i.checked).collect();
-        assert_eq!(states, vec![true, false, true]);
+        let states: Vec<Option<bool>> = goal.items.iter().map(|i| i.checked()).collect();
+        assert_eq!(states, vec![Some(true), Some(false), Some(true)]);
     }
 
     #[test]

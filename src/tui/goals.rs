@@ -16,7 +16,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::model::{Goal, GoalItem, Priority, Status};
+use crate::model::{Goal, GoalItem, NodeState, Priority, Status};
 
 /// Which goal a row belongs to. Headers and milestones are foldable; tasks
 /// (leaves) are not.
@@ -136,7 +136,7 @@ fn item_style(item: &GoalItem) -> Style {
     if item.metadata.priority.as_ref() == Some(&Priority::High) {
         return Style::default().fg(Color::Red);
     }
-    if item.children.is_empty() && item.checked {
+    if item.children.is_empty() && item.checked() == Some(true) {
         return Style::default().add_modifier(Modifier::DIM);
     }
     Style::default()
@@ -181,7 +181,13 @@ fn push_item(
     rows: &mut Vec<GoalRow>,
 ) {
     let indent = "  ".repeat(depth);
-    let check = if item.checked { 'x' } else { ' ' };
+    // Commit 1 (refactor): Group nodes render as if `[ ]` — no Group nodes
+    // are produced by the parser yet, so this branch is unreachable in
+    // practice. Commit 4 (TUI display) replaces this with proper rendering.
+    let check = match item.state {
+        NodeState::Checkbox { checked: true } => 'x',
+        _ => ' ',
+    };
     let style = item_style(item);
     let mut badges: Vec<String> = Vec::new();
     if let Some(p) = &item.metadata.priority {
@@ -225,7 +231,11 @@ fn push_item(
         });
     } else {
         // Milestone: foldable.  Append direct-children ratio.
-        let checked_children = item.children.iter().filter(|c| c.checked).count();
+        let checked_children = item
+            .children
+            .iter()
+            .filter(|c| c.checked() == Some(true))
+            .count();
         let total_children = item.children.len();
         let ratio = format!("    {checked_children}/{total_children}");
         let marker = if expanded.contains(key) { '▼' } else { '▸' };
@@ -284,7 +294,7 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Metadata, Span};
+    use crate::model::{Metadata, NodeState, Span};
     use std::path::PathBuf;
 
     fn goal(title: &str, items: Vec<GoalItem>) -> Goal {
@@ -299,8 +309,9 @@ mod tests {
     fn leaf(text: &str, checked: bool) -> GoalItem {
         GoalItem {
             text: text.into(),
-            checked,
+            state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
+            reference: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from("x.md"),
@@ -315,8 +326,9 @@ mod tests {
     fn milestone(text: &str, checked: bool, children: Vec<GoalItem>) -> GoalItem {
         GoalItem {
             text: text.into(),
-            checked,
+            state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
+            reference: None,
             children,
             span: Span {
                 path: PathBuf::from("x.md"),
