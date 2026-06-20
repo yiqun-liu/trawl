@@ -41,7 +41,7 @@ pub fn parse(content: &str, rel: &Path, ctx: &ParseContext) -> Option<Goal> {
         body.push((idx + 1, line));
     }
 
-    let items = parse_body(&body, rel, ctx);
+    let items = parse_body(&body, rel, level, ctx);
     let title = title_of(&lines).unwrap_or_else(|| filename_stem(rel));
     let badge = badge(rel);
 
@@ -67,16 +67,72 @@ fn find_section_start(lines: &[&str], names: &[String]) -> Option<(usize, usize)
     None
 }
 
-/// Parse the section body into checkbox forest + table items, in order.
-fn parse_body(body: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> Vec<GoalItem> {
+/// Parse the section body into a goal item forest. Recognizes four line
+/// kinds: checkbox items (`- [ ]`/`- [x]`), plain bullets with children
+/// (`- group`), subsection headings (`### ...`), and tables. Headings and
+/// indentation form parallel stacks — a heading resets the indent stack and
+/// establishes a fresh subtree context; checkboxes/plain-bullets nest within
+/// the current heading context by 2-space indentation.
+fn parse_body(
+    body: &[(usize, &str)],
+    rel: &Path,
+    section_level: usize,
+    ctx: &ParseContext,
+) -> Vec<GoalItem> {
     let mut arena: Vec<Node> = Vec::new();
-    let mut stack: Vec<(usize, usize)> = Vec::new(); // (level, arena index)
-    let mut table_items: Vec<GoalItem> = Vec::new();
+    // (indent_level, arena_index) — for checkbox/plain-bullet nesting within
+    // the current heading context.
+    let mut indent_stack: Vec<(usize, usize)> = Vec::new();
+    // (relative_heading_level, arena_index) — for heading-based nesting.
+    // Reset to empty at start; cleared implicitly when a shallower heading
+    // pops deeper ones off the top.
+    let mut heading_stack: Vec<(usize, usize)> = Vec::new();
 
     let mut i = 0;
     while i < body.len() {
         let (lineno, line) = body[i];
 
+        // Heading within the section: becomes a Group node.
+        if let Some(caps) = heading_re().captures(line) {
+            let heading_level = caps[1].len();
+            let relative_level = heading_level.saturating_sub(section_level);
+            // A heading resets the indentation context.
+            indent_stack.clear();
+            // Pop the heading stack until we find a strictly shallower heading.
+            while heading_stack
+                .last()
+                .is_some_and(|(lvl, _)| *lvl >= relative_level)
+            {
+                heading_stack.pop();
+            }
+            let parent = heading_stack.last().map(|&(_, idx)| idx);
+            let (desc, metadata) = metadata::extract(caps[2].trim(), ctx.tokens());
+            let item = GoalItem {
+                text: desc,
+                state: NodeState::Group,
+                metadata,
+                reference: None,
+                children: Vec::new(),
+                span: Span {
+                    path: PathBuf::from(rel),
+                    line: lineno,
+                },
+                blame_author: None,
+                blame_date: None,
+                blame_commit: None,
+            };
+            let idx = arena.len();
+            arena.push(Node {
+                parent,
+                item,
+                drop_if_leaf: false,
+            });
+            heading_stack.push((relative_level, idx));
+            i += 1;
+            continue;
+        }
+
+        // Checkbox item.
         if let Some(caps) = checkbox_re().captures(line) {
             let level = caps[1].len() / 2;
             let checked = matches!(caps[2].chars().next(), Some('x') | Some('X') | Some('✓'));
@@ -95,22 +151,70 @@ fn parse_body(body: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> Vec<Goa
                 blame_date: None,
                 blame_commit: None,
             };
-            // Resolve parent: nearest ancestor with a strictly smaller level.
-            while stack.last().is_some_and(|(lvl, _)| *lvl >= level) {
-                stack.pop();
+            let parent = resolve_parent(&indent_stack, &heading_stack, level);
+            // Pop indent stack while top is at same-or-deeper level.
+            while indent_stack.last().is_some_and(|(lvl, _)| *lvl >= level) {
+                indent_stack.pop();
             }
-            let parent = stack.last().map(|&(_, idx)| idx);
             let idx = arena.len();
-            arena.push(Node { parent, item });
-            stack.push((level, idx));
+            arena.push(Node {
+                parent,
+                item,
+                drop_if_leaf: false,
+            });
+            indent_stack.push((level, idx));
             i += 1;
             continue;
         }
 
-        // Table: this line is a row and the next line is a separator.
+        // Plain bullet (no checkbox): becomes a Group node if it ends up with
+        // children; dropped at assembly otherwise so context notes inside the
+        // section continue to be ignored.
+        if let Some(caps) = plain_bullet_re().captures(line) {
+            let level = caps[1].len() / 2;
+            let (desc, metadata) = metadata::extract(caps[2].trim(), ctx.tokens());
+            let item = GoalItem {
+                text: desc,
+                state: NodeState::Group,
+                metadata,
+                reference: None,
+                children: Vec::new(),
+                span: Span {
+                    path: PathBuf::from(rel),
+                    line: lineno,
+                },
+                blame_author: None,
+                blame_date: None,
+                blame_commit: None,
+            };
+            let parent = resolve_parent(&indent_stack, &heading_stack, level);
+            while indent_stack.last().is_some_and(|(lvl, _)| *lvl >= level) {
+                indent_stack.pop();
+            }
+            let idx = arena.len();
+            arena.push(Node {
+                parent,
+                item,
+                drop_if_leaf: true,
+            });
+            indent_stack.push((level, idx));
+            i += 1;
+            continue;
+        }
+
+        // Table: this line is a row and the next line is a separator. Table
+        // rows are flat leaves attached to the current heading context (or
+        // the goal root if no heading is open).
         if is_table_line(line) && body.get(i + 1).is_some_and(|(_, next)| is_table_sep(next)) {
-            let (consumed, items) = parse_table(&body[i..], rel, ctx);
-            table_items.extend(items);
+            let (consumed, rows) = parse_table(&body[i..], rel, ctx);
+            let parent = heading_stack.last().map(|&(_, idx)| idx);
+            for row in rows {
+                arena.push(Node {
+                    parent,
+                    item: row,
+                    drop_if_leaf: false,
+                });
+            }
             i += consumed;
             continue;
         }
@@ -118,14 +222,32 @@ fn parse_body(body: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> Vec<Goa
         i += 1; // ignored line
     }
 
-    let mut forest = assemble_forest(&arena);
-    forest.extend(table_items);
-    forest
+    assemble_forest(&arena)
+}
+
+/// Resolve the parent arena index for a checkbox/plain-bullet at `level`:
+/// the nearest open indent ancestor, falling back to the current heading
+/// context if the indent stack is empty.
+fn resolve_parent(
+    indent_stack: &[(usize, usize)],
+    heading_stack: &[(usize, usize)],
+    level: usize,
+) -> Option<usize> {
+    indent_stack
+        .iter()
+        .rev()
+        .find(|(lvl, _)| *lvl < level)
+        .map(|&(_, idx)| idx)
+        .or_else(|| heading_stack.last().map(|&(_, idx)| idx))
 }
 
 struct Node {
     parent: Option<usize>,
     item: GoalItem,
+    /// Plain bullets are dropped at assembly if they end up with no children
+    /// (preserving the "context notes inside the section stay ignored"
+    /// behavior). Headings and checkboxes are always retained.
+    drop_if_leaf: bool,
 }
 
 fn assemble_forest(arena: &[Node]) -> Vec<GoalItem> {
@@ -139,17 +261,30 @@ fn assemble_forest(arena: &[Node]) -> Vec<GoalItem> {
     }
     roots
         .iter()
+        .filter(|&&r| !should_prune(r, arena, &children_of))
         .map(|&r| assemble(r, arena, &children_of))
         .collect()
 }
 
 fn assemble(idx: usize, arena: &[Node], children_of: &[Vec<usize>]) -> GoalItem {
-    let mut item = arena[idx].item.clone();
-    item.children = children_of[idx]
+    let node = &arena[idx];
+    let children: Vec<GoalItem> = children_of[idx]
         .iter()
+        .filter(|&&c| !should_prune(c, arena, children_of))
         .map(|&c| assemble(c, arena, children_of))
         .collect();
+    let mut item = node.item.clone();
+    item.children = children;
     item
+}
+
+/// Whether arena node `idx` should be pruned from the assembled tree: a
+/// plain-bullet group node (drop_if_leaf = true) that ended up with no
+/// children. Such nodes represent context notes ("see also: ...") that the
+/// user did not intend as structural — preserving the long-standing behavior
+/// that ignored non-checkbox content inside a goal tracker section.
+fn should_prune(idx: usize, arena: &[Node], children_of: &[Vec<usize>]) -> bool {
+    arena[idx].drop_if_leaf && children_of[idx].is_empty()
 }
 
 /// Parse a contiguous table block beginning at `block[0]`. Returns the number
@@ -354,6 +489,13 @@ fn heading_re() -> &'static Regex {
 fn checkbox_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(r"^(\s*)[-*+]\s+\[([ xX✓])\]\s*(.*)$").unwrap())
+}
+
+/// Plain bullet (`- text`, `* text`, `+ text`) without a checkbox. Must be
+/// checked *after* [`checkbox_re`] so checkbox lines are not misclassified.
+fn plain_bullet_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"^(\s*)[-*+]\s+(.+?)\s*$").unwrap())
 }
 
 /// First H1 (`#`) heading text in the file, if any.

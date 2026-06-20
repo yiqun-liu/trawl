@@ -24,21 +24,29 @@ fn parses_fixture_goal() {
     assert_eq!(goal.badge, "ml/llm/");
 
     // The "References" section and intro text must not contribute items.
-    // Foundations has 2 top-level milestones; Sprint Board adds 3 table rows.
-    assert_eq!(goal.items.len(), 5);
+    // The two `###` subsections (Foundations, Sprint Board) are now parsed
+    // as structural group nodes — each owns the items beneath it.
+    assert_eq!(goal.items.len(), 2);
+    assert!(goal.items[0].is_group(), "Foundations is a group node");
+    assert_eq!(goal.items[0].text, "Foundations");
+    assert!(goal.items[1].is_group(), "Sprint Board is a group node");
+    assert_eq!(goal.items[1].text, "Sprint Board");
 
-    // Two checkbox milestones at the top.
-    assert!(goal.items[0].is_milestone());
-    assert!(goal.items[1].is_milestone());
+    // Foundations contains two checkbox milestones.
+    let foundations = &goal.items[0].children;
+    assert_eq!(foundations.len(), 2);
+    assert!(foundations[0].is_milestone());
+    assert!(foundations[1].is_milestone());
 
-    // Table rows become flat leaves; state column drives the done heuristic.
-    let rows = &goal.items[2..];
-    assert_eq!(rows.len(), 3);
-    assert!(!rows[0].checked().unwrap(), "TODO state is not done");
-    assert!(rows[1].checked().unwrap(), "done state is done");
-    assert!(!rows[2].checked().unwrap(), "empty state is not done");
-    assert_eq!(rows[0].metadata.priority, Some(Priority::High));
-    assert_eq!(rows[1].metadata.owner.as_deref(), Some("bob"));
+    // Sprint Board contains three table rows as flat leaves. The state
+    // column drives the done heuristic.
+    let sprint = &goal.items[1].children;
+    assert_eq!(sprint.len(), 3);
+    assert!(!sprint[0].checked().unwrap(), "TODO state is not done");
+    assert!(sprint[1].checked().unwrap(), "done state is done");
+    assert!(!sprint[2].checked().unwrap(), "empty state is not done");
+    assert_eq!(sprint[0].metadata.priority, Some(Priority::High));
+    assert_eq!(sprint[1].metadata.owner.as_deref(), Some("bob"));
 }
 
 #[test]
