@@ -12,7 +12,7 @@ use chrono::NaiveDate;
 use regex::Regex;
 
 use crate::metadata;
-use crate::model::{Goal, GoalItem, Metadata, NodeState, Priority, Span};
+use crate::model::{Goal, GoalItem, Metadata, NodeState, Priority, Reference, Span};
 use crate::parser::ParseContext;
 
 /// Parse a file's contents into a [`Goal`], if it contains a goal section.
@@ -137,11 +137,12 @@ fn parse_body(
             let level = caps[1].len() / 2;
             let checked = matches!(caps[2].chars().next(), Some('x') | Some('X') | Some('✓'));
             let (desc, metadata) = metadata::extract(caps[3].trim(), ctx.tokens());
+            let (text, reference) = split_reference(desc);
             let item = GoalItem {
-                text: desc,
+                text,
                 state: NodeState::Checkbox { checked },
                 metadata,
-                reference: None,
+                reference,
                 children: Vec::new(),
                 span: Span {
                     path: PathBuf::from(rel),
@@ -173,11 +174,16 @@ fn parse_body(
         if let Some(caps) = plain_bullet_re().captures(line) {
             let level = caps[1].len() / 2;
             let (desc, metadata) = metadata::extract(caps[2].trim(), ctx.tokens());
+            let (text, reference) = split_reference(desc);
+            // A reference-bearing bullet survives even without children (the
+            // resolver attaches cloned children in Pass 2). A bare note like
+            // "- see also: foo.md" does not.
+            let drop_if_leaf = reference.is_none();
             let item = GoalItem {
-                text: desc,
+                text,
                 state: NodeState::Group,
                 metadata,
-                reference: None,
+                reference,
                 children: Vec::new(),
                 span: Span {
                     path: PathBuf::from(rel),
@@ -195,7 +201,45 @@ fn parse_body(
             arena.push(Node {
                 parent,
                 item,
-                drop_if_leaf: true,
+                drop_if_leaf,
+            });
+            indent_stack.push((level, idx));
+            i += 1;
+            continue;
+        }
+
+        // Standalone reference line: `[[target]]` or `[text](target)` on its
+        // own, without a `- ` bullet. Becomes a Group node with a reference.
+        // Indentation (leading whitespace) is respected, mirroring bullet
+        // nesting.
+        if let Some((raw_target, display_text)) = match_reference(line.trim()) {
+            let level = line.len().saturating_sub(line.trim_start().len()) / 2;
+            let item = GoalItem {
+                text: display_text.clone(),
+                state: NodeState::Group,
+                metadata: Metadata::default(),
+                reference: Some(Reference::Pending {
+                    raw_target,
+                    display_text,
+                }),
+                children: Vec::new(),
+                span: Span {
+                    path: PathBuf::from(rel),
+                    line: lineno,
+                },
+                blame_author: None,
+                blame_date: None,
+                blame_commit: None,
+            };
+            let parent = resolve_parent(&indent_stack, &heading_stack, level);
+            while indent_stack.last().is_some_and(|(lvl, _)| *lvl >= level) {
+                indent_stack.pop();
+            }
+            let idx = arena.len();
+            arena.push(Node {
+                parent,
+                item,
+                drop_if_leaf: false,
             });
             indent_stack.push((level, idx));
             i += 1;
@@ -481,6 +525,25 @@ pub(crate) fn rewrite_state_cell(row_line: &str, state_col: usize, new_value: &s
     }
 }
 
+/// Inspect a post-metadata-extraction description. If it is exactly a
+/// reference (whole text matches `[[target]]` or `[text](target)`), return
+/// `(display_text, Some(Pending))`. Otherwise return `(original_text, None)`
+/// so the item is treated as a literal task/milestone as before.
+fn split_reference(desc: String) -> (String, Option<Reference>) {
+    if let Some((raw_target, display_text)) = match_reference(&desc) {
+        let text = display_text.clone();
+        (
+            text,
+            Some(Reference::Pending {
+                raw_target,
+                display_text,
+            }),
+        )
+    } else {
+        (desc, None)
+    }
+}
+
 fn heading_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(r"^(#{1,6})\s+(.+?)\s*$").unwrap())
@@ -496,6 +559,45 @@ fn checkbox_re() -> &'static Regex {
 fn plain_bullet_re() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| Regex::new(r"^(\s*)[-*+]\s+(.+?)\s*$").unwrap())
+}
+
+/// Wikilink reference form: `[[target]]` (optionally with `#anchor`,
+/// which the resolver strips). Must match the whole trimmed text.
+fn wikilink_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"^\[\[([^\]]+)\]\]$").unwrap())
+}
+
+/// Markdown link reference form: `[display](target)`. Must match the whole
+/// trimmed text.
+fn mdlink_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"^\[([^\]]+)\]\(([^)\s]+)\)$").unwrap())
+}
+
+/// If `text` is exactly a reference (entire content is a wikilink or
+/// markdown link), return `(raw_target, display_text)`. `display_text` is
+/// empty for wikilinks and the link text for markdown links. Returns `None`
+/// for embedded references (e.g., `"see [[x]] for details"`) — those stay
+/// literal text; only line-as-reference is structurally meaningful.
+fn match_reference(text: &str) -> Option<(String, String)> {
+    let text = text.trim();
+    if let Some(caps) = wikilink_re().captures(text) {
+        let target = caps[1].trim();
+        if target.is_empty() {
+            return None;
+        }
+        return Some((target.to_string(), String::new()));
+    }
+    if let Some(caps) = mdlink_re().captures(text) {
+        let display = caps[1].trim();
+        let target = caps[2].trim();
+        if target.is_empty() {
+            return None;
+        }
+        return Some((target.to_string(), display.to_string()));
+    }
+    None
 }
 
 /// First H1 (`#`) heading text in the file, if any.

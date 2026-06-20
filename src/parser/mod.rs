@@ -13,6 +13,7 @@ use crate::model::Priority;
 
 pub mod goal;
 pub mod inline;
+pub mod resolve;
 
 /// Shared parsing context, compiled once from configuration.
 #[derive(Debug)]

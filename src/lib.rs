@@ -50,6 +50,16 @@ pub fn scan(options: &ScanOptions, ctx: &ParseContext) -> Result<ScanResult> {
             }
         }
     }
+
+    // Pass 2: resolve cross-document references between parsed goals. The
+    // scanned file set lets the resolver distinguish NoGoalTracker (file was
+    // scanned but has no tracker) from NotFound (file not in the scan set).
+    let scanned_files: std::collections::HashSet<PathBuf> = files
+        .iter()
+        .map(|fc| fc.path.strip_prefix(root).unwrap_or(&fc.path).to_path_buf())
+        .collect();
+    parser::resolve::resolve_references(&mut goals, &scanned_files);
+
     if options.show_git_blame {
         let _ = blame::enrich_tasks(root, &mut inline_tasks);
         let _ = blame::enrich_goals(root, &mut goals);
