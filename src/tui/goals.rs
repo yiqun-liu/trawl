@@ -11,7 +11,6 @@ use std::collections::HashSet;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::Line,
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
@@ -326,7 +325,13 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
     let items: Vec<ListItem> = app
         .goal_rows
         .iter()
-        .map(|row| ListItem::new(Line::from(row.text.clone()).style(row.style)))
+        .map(|row| {
+            ListItem::new(super::search::highlighted_line(
+                &row.text,
+                row.style,
+                &app.search_query,
+            ))
+        })
         .collect();
 
     let list = List::new(items)

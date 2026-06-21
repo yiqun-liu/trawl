@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::Line,
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
@@ -321,7 +320,13 @@ pub(super) fn draw(f: &mut Frame, app: &super::App, area: Rect) {
     let items: Vec<ListItem> = app
         .inline_rows
         .iter()
-        .map(|row| ListItem::new(Line::from(row.text.clone()).style(row.style)))
+        .map(|row| {
+            ListItem::new(super::search::highlighted_line(
+                &row.text,
+                row.style,
+                &app.search_query,
+            ))
+        })
         .collect();
 
     let (high, med, low, untagged) = priority_breakdown(&app.inline_displayed);

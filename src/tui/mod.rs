@@ -32,6 +32,7 @@ use crate::ScanResult;
 mod filter;
 mod goals;
 mod inline_view;
+mod search;
 
 use filter::Filter;
 use goals::{flatten_goals, GoalRow, GoalRowKind};
@@ -49,6 +50,7 @@ enum View {
 enum Mode {
     Normal,
     FilterInput,
+    SearchInput,
     CellEdit,
 }
 
@@ -176,6 +178,19 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         return;
     }
 
+    if app.mode == Mode::SearchInput {
+        match key.code {
+            KeyCode::Enter => app.apply_search(),
+            KeyCode::Esc => app.cancel_search(),
+            KeyCode::Backspace => {
+                app.search_input.pop();
+            }
+            KeyCode::Char(c) => app.search_input.push(c),
+            _ => {}
+        }
+        return;
+    }
+
     if app.mode == Mode::CellEdit {
         match key.code {
             KeyCode::Enter => app.apply_cell_edit(),
@@ -206,9 +221,18 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('X') => app.expand_all(),
         KeyCode::Char('S') => app.show_stats = true,
         KeyCode::Char('f') => app.begin_filter(),
+        KeyCode::Char('/') => app.begin_search(),
+        KeyCode::Char('n') => app.next_match(),
+        KeyCode::Char('N') => app.prev_match(),
         KeyCode::Char('s') => app.cycle_sort(),
         KeyCode::Char('g') => app.toggle_blame(),
-        KeyCode::Esc => app.clear_filter(),
+        KeyCode::Esc => {
+            if !app.search_query.is_empty() {
+                app.clear_search();
+            } else {
+                app.clear_filter();
+            }
+        }
         KeyCode::Char('e') => app.edit_selected(),
         KeyCode::Char(' ') => app.toggle_checkbox(),
         KeyCode::Char('?') => app.show_help = true,
@@ -232,18 +256,29 @@ fn draw(f: &mut Frame, app: &App) {
         format!("edit state column > {}", app.cell_input)
     } else if app.mode == Mode::FilterInput {
         format!("filter> {}", app.filter_input)
+    } else if app.mode == Mode::SearchInput {
+        format!("/ {}", app.search_input)
     } else {
-        match app.view {
+        let mut base = match app.view {
             View::Goals => {
-                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  S: stats  C: done  Z: all  X: expand all  j/k  Tab  q".to_string()
+                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  S: stats  C: done  Z: all  X: expand all  /: search  j/k  Tab  q".to_string()
             }
             View::Inline if app.filter.is_some() => {
-                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  S: stats  Z: all  X: expand  Tab: Goals  q: quit", app.filter_query)
+                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  S: stats  Z: all  X: expand  /: search  Tab: Goals  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  s: sort  g: blame  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  j/k  Tab: Goals  q: quit".to_string()
+                "f: filter  /: search  s: sort  g: blame  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  n/N  j/k  Tab: Goals  q: quit".to_string()
             }
+        };
+        if !app.search_query.is_empty() {
+            let total = app.search_matches.len();
+            let pos = if total == 0 { 0 } else { app.search_pos + 1 };
+            base.push_str(&format!(
+                "  | /: \"{}\" [{}/{}]",
+                app.search_query, pos, total
+            ));
         }
+        base
     };
     let footer_widget = Paragraph::new(Line::from(footer_text))
         .style(Style::default().add_modifier(Modifier::REVERSED));
@@ -326,6 +361,11 @@ fn help_text(view: View) -> Vec<Line<'static>> {
         lines.push(Line::from("  Esc          clear filter"));
     }
     lines.push(Line::from(""));
+    lines.push(Line::from("Search"));
+    lines.push(Line::from("  /            search (both views)"));
+    lines.push(Line::from("  n / N        next / previous match"));
+    lines.push(Line::from("  Esc          clear search"));
+    lines.push(Line::from(""));
     lines.push(Line::from("  ?            toggle this help"));
     lines.push(Line::from("  q / Ctrl+C   quit"));
     lines
@@ -367,6 +407,10 @@ struct App {
     filter: Option<Filter>,
     filter_query: String,
     filter_input: String,
+    search_query: String,
+    search_input: String,
+    search_matches: Vec<usize>,
+    search_pos: usize,
     cell_input: String,
     cell_edit: Option<CellTarget>,
     goal_rows: Vec<GoalRow>,
@@ -429,6 +473,10 @@ impl App {
             filter: None,
             filter_query: String::new(),
             filter_input: String::new(),
+            search_query: String::new(),
+            search_input: String::new(),
+            search_matches: Vec::new(),
+            search_pos: 0,
             cell_input: String::new(),
             cell_edit: None,
             goal_rows,
@@ -478,6 +526,104 @@ impl App {
             self.filter_query.clear();
             self.rebuild_inline();
             self.inline_selected = 0;
+        }
+    }
+
+    /// `/`: begin (or edit) the search query.
+    fn begin_search(&mut self) {
+        self.mode = Mode::SearchInput;
+        self.search_input = self.search_query.clone();
+    }
+
+    /// Enter in search mode: apply the query, index matches in the active
+    /// view, and jump the cursor to the first match.
+    fn apply_search(&mut self) {
+        self.search_query = self.search_input.clone();
+        self.mode = Mode::Normal;
+        self.refresh_search();
+        self.search_pos = 0;
+        if let Some(&row) = self.search_matches.first() {
+            self.select_search_row(row);
+        }
+    }
+
+    /// Esc in search mode: discard the typed text, keep the prior search.
+    fn cancel_search(&mut self) {
+        self.mode = Mode::Normal;
+    }
+
+    /// Esc in normal mode (when a search is active): clear it.
+    fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.search_input.clear();
+        self.search_matches.clear();
+        self.search_pos = 0;
+    }
+
+    /// `n`: jump to the next match (wraps around).
+    fn next_match(&mut self) {
+        self.advance_match(1);
+    }
+
+    /// `N`: jump to the previous match (wraps around).
+    fn prev_match(&mut self) {
+        self.advance_match(-1);
+    }
+
+    fn advance_match(&mut self, step: i32) {
+        let len = self.search_matches.len();
+        if len == 0 {
+            return;
+        }
+        let next = ((self.search_pos as i32 + step).rem_euclid(len as i32)) as usize;
+        self.search_pos = next;
+        self.select_search_row(self.search_matches[next]);
+    }
+
+    /// Move the cursor to `row` in the active view.
+    fn select_search_row(&mut self, row: usize) {
+        match self.view {
+            View::Goals => {
+                if row < self.goal_rows.len() {
+                    self.goal_selected = row;
+                }
+            }
+            View::Inline => {
+                if row < self.inline_rows.len() {
+                    self.inline_selected = row;
+                }
+            }
+        }
+    }
+
+    /// Recompute `search_matches` for the active view from its current rows.
+    /// Called after every row rebuild and after `toggle_view` so indices stay
+    /// valid. A no-op when no search is active.
+    fn refresh_search(&mut self) {
+        if self.search_query.is_empty() {
+            self.search_matches.clear();
+            self.search_pos = 0;
+            return;
+        }
+        let query = self.search_query.clone();
+        self.search_matches = match self.view {
+            View::Goals => self
+                .goal_rows
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| search::matches(&r.text, &query))
+                .map(|(i, _)| i)
+                .collect(),
+            View::Inline => self
+                .inline_rows
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| search::matches(&r.text, &query))
+                .map(|(i, _)| i)
+                .collect(),
+        };
+        if self.search_pos >= self.search_matches.len() {
+            self.search_pos = 0;
         }
     }
 
@@ -656,6 +802,7 @@ impl App {
         } else {
             self.goal_selected = 0;
         }
+        self.refresh_search();
     }
 
     /// Rebuild the inline tree/rows from the currently displayed tasks. Does
@@ -670,6 +817,7 @@ impl App {
             &self.file_contents,
             self.context_lines,
         );
+        self.refresh_search();
     }
 
     fn toggle_view(&mut self) {
@@ -677,6 +825,7 @@ impl App {
             View::Goals => View::Inline,
             View::Inline => View::Goals,
         };
+        self.refresh_search();
     }
 
     fn move_cursor(&mut self, delta: i32) {
@@ -929,6 +1078,7 @@ impl App {
             View::Inline => self.rebuild_inline_rows(),
         }
         self.reanchor(anchor);
+        self.refresh_search();
     }
 
     /// The stable identity of the selected row, used to track the cursor
@@ -1567,5 +1717,67 @@ mod tests {
         app.toggle_blame();
         assert!(!app.show_blame);
         assert!(!app.goal_rows.is_empty());
+    }
+
+    // ---- incremental search (/) ----
+
+    #[test]
+    fn search_next_prev_wrap_around() {
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
+        app.search_matches = vec![5, 10, 15];
+        app.search_pos = 0;
+        app.next_match();
+        assert_eq!(app.search_pos, 1);
+        app.next_match();
+        assert_eq!(app.search_pos, 2);
+        app.next_match();
+        assert_eq!(app.search_pos, 0, "next should wrap to first");
+        app.prev_match();
+        assert_eq!(app.search_pos, 2, "prev should wrap to last");
+    }
+
+    #[test]
+    fn search_advance_with_no_matches_is_noop() {
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
+        app.search_matches.clear();
+        app.search_pos = 5;
+        app.next_match();
+        app.prev_match();
+        assert_eq!(app.search_pos, 5);
+    }
+
+    #[test]
+    fn refresh_search_indexes_matching_rows_and_clears() {
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
+        app.view = View::Goals;
+        // Both sample goal headers carry the "(root)" badge.
+        app.search_query = "root".to_string();
+        app.refresh_search();
+        assert_eq!(app.search_matches.len(), 2);
+        // An empty query clears the index.
+        app.search_query.clear();
+        app.refresh_search();
+        assert!(app.search_matches.is_empty());
     }
 }
