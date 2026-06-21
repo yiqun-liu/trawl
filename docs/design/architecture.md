@@ -212,7 +212,7 @@ never aborts a scan. The result is `Vec<FileContents { path, content }>`.
 `parse_line(line, ctx) -> Option<InlineTask>`:
 
 1. Find the first keyword occurrence with a word-boundary regex
-   `\b(TODO|FIXME|HACK|XXX|BUG|NOTE)\b` (case sensitivity from config).
+   `\b(TODO|FIXME|HACK|XXX|BUG)\b` (case sensitivity from config).
    If none, return `None`.
 2. Slice the line from the keyword onward (`TODO(auth): … !high`).
 3. Read an optional `(scope)`.
@@ -220,7 +220,7 @@ never aborts a scan. The result is `Vec<FileContents { path, content }>`.
 5. The remainder is the raw description; run it through `metadata::extract`
    to strip tokens and yield `(clean_description, Metadata)`.
 6. Apply the keyword's default priority unless `metadata.priority` is set
-   (`FIXME`/`BUG` → High, `HACK`/`XXX` → Med, `TODO`/`NOTE` → none).
+   (`FIXME`/`BUG` → High, `HACK`/`XXX` → Med, `TODO` → none).
 
 The parser degrades gracefully: every shortening of the form — fully
 structured, scope-only, separator-only, bare, minimal — yields a valid

@@ -210,7 +210,7 @@ All components except the keyword and description are optional. Bare
 `TODO: text` is always valid, making existing markers immediately
 parseable.
 
-**Supported keywords:** `TODO`, `FIXME`, `HACK`, `XXX`, `BUG`, `NOTE`
+**Supported keywords:** `TODO`, `FIXME`, `HACK`, `XXX`, `BUG`
 (configurable).
 
 **Example across contexts:**
@@ -498,7 +498,7 @@ exclude = ["docs/", "tests/fixtures/"]
 
 ```toml
 [scan]
-keywords = ["TODO", "FIXME", "HACK", "XXX", "BUG", "NOTE"]
+keywords = ["TODO", "FIXME", "HACK", "XXX", "BUG"]
 keyword_case_sensitive = false
 goal_section_names = ["GOAL TRACKER", "TODO"]
 include = []  # e.g. ["*.md", "*.rs", "*.py"] — restrict to specific file types
@@ -506,6 +506,7 @@ exclude = ["target/", "node_modules/", ".git/"]  # built-in defaults; project co
 max_file_size = "1MB"
 scan_hidden = false
 only_tracked = true
+skip_quoted_keywords = true  # skip keywords inside "..." or `...` (string literals / code spans)
 
 [tokens]
 owner = "@"

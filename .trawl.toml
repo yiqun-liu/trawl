@@ -2,7 +2,7 @@
 # Exclude docs and test fixtures from scanning, since they contain
 # TODO/GOAL TRACKER patterns used as examples, not real work items.
 # README.md is also excluded: its prose contains literal keyword names
-# (TODO/FIXME/HACK/XXX/BUG/NOTE) as documentation, which would otherwise
+# (TODO/FIXME/HACK/XXX/BUG) as documentation, which would otherwise
 # surface as false-positive inline tasks when trawl scans itself.
 
 [scan]

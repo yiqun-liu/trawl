@@ -13,7 +13,7 @@ embedded in a repository. It scans files for two types of annotations:
 - **Goals & Milestones**: structured objectives tracked via `## GOAL TRACKER`
   sections in markdown files (courses, books, projects)
 - **Inline Tasks**: inline markers in any file (`TODO`, `FIXME`, `HACK`,
-  `XXX`, `BUG`, `NOTE`)
+  `XXX`, `BUG`)
 
 Both are **scanned and auto-discovered** — the user does not register or
 configure individual items. The files *are* the database.

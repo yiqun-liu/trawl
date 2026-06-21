@@ -8,7 +8,7 @@ use clap::Parser;
 
 use trawl::{scan, Config, InlineTask, ParseContext, Priority, ScanOptions, ScanResult, Status};
 
-/// TODO Repository Annotation Work List.
+/// `TODO` Repository Annotation Work List.
 ///
 /// Discover and visualize work items (inline TODOs and goal trackers)
 /// embedded in a repository.

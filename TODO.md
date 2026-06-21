@@ -118,7 +118,7 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Preserve cursor position during expand/collapse
 - [x] Color Coding
   - [x] Define priority color scheme (red/yellow/gray)
-  - [x] Define keyword color scheme (cyan for TODO, red for FIXME, etc.)
+  - [x] Define keyword color scheme (cyan for `TODO`, red for `FIXME`, etc.)
   - [x] Dim completed goal tasks
   - [x] Highlight high-priority items
 - [x] Checkbox Toggle

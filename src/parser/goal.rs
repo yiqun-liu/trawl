@@ -447,7 +447,7 @@ fn build_row(
     (description, checked, meta)
 }
 
-/// Done heuristic: a cell counts as done unless it is empty or contains TODO.
+/// Done heuristic: a cell counts as done unless it is empty or contains `TODO`.
 pub(crate) fn done_heuristic(cell: &str) -> bool {
     let trimmed = cell.trim();
     !(trimmed.is_empty() || trimmed.to_lowercase().contains("todo"))

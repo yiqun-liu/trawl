@@ -45,6 +45,7 @@ pub struct ScanConfig {
     pub max_file_size: String,
     pub scan_hidden: bool,
     pub only_tracked: bool,
+    pub skip_quoted_keywords: bool,
 }
 
 impl ScanConfig {
@@ -75,7 +76,6 @@ impl Default for Config {
                     "HACK".into(),
                     "XXX".into(),
                     "BUG".into(),
-                    "NOTE".into(),
                 ],
                 keyword_case_sensitive: false,
                 goal_section_names: vec!["GOAL TRACKER".into(), "TODO".into()],
@@ -84,6 +84,7 @@ impl Default for Config {
                 max_file_size: "1MB".into(),
                 scan_hidden: false,
                 only_tracked: true,
+                skip_quoted_keywords: true,
             },
             tokens: default_tokens(),
             headers: default_headers(),
@@ -217,6 +218,9 @@ impl Config {
             if let Some(v) = scan.only_tracked {
                 self.scan.only_tracked = v;
             }
+            if let Some(v) = scan.skip_quoted_keywords {
+                self.scan.skip_quoted_keywords = v;
+            }
         }
         if let Some(tokens) = file.tokens {
             for (k, v) in tokens {
@@ -280,6 +284,8 @@ struct ScanFile {
     scan_hidden: Option<bool>,
     #[serde(default)]
     only_tracked: Option<bool>,
+    #[serde(default)]
+    skip_quoted_keywords: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -354,10 +360,7 @@ mod tests {
     #[test]
     fn defaults_have_builtin_keywords_and_tokens() {
         let c = Config::default();
-        assert_eq!(
-            c.scan.keywords,
-            vec!["TODO", "FIXME", "HACK", "XXX", "BUG", "NOTE"]
-        );
+        assert_eq!(c.scan.keywords, vec!["TODO", "FIXME", "HACK", "XXX", "BUG"]);
         assert_eq!(c.tokens.get("owner").map(String::as_str), Some("@"));
         assert_eq!(c.tokens.get("priority").map(String::as_str), Some("!"));
         assert_eq!(c.display.context_lines, 2);

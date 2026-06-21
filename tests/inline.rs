@@ -68,3 +68,16 @@ fn parses_markdown_contexts() {
         .expect("inline markdown TODO should parse");
     assert_eq!(tagged.metadata.tags, vec!["arch".to_string()]);
 }
+
+#[test]
+fn skips_quoted_keywords_keeps_bare_ones() {
+    let ctx = ParseContext::from_config(&Config::default()).unwrap();
+    let tasks = inline::parse_file(&load("quoted.rs"), &ctx);
+
+    // Only the two bare-keyword comment lines should be reported.
+    assert_eq!(tasks.len(), 2, "expected 2 tasks, got {tasks:?}");
+    assert_eq!(tasks[0].keyword, "TODO");
+    assert_eq!(tasks[0].description, "real task one");
+    assert_eq!(tasks[1].keyword, "BUG");
+    assert_eq!(tasks[1].description, "real bug");
+}

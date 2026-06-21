@@ -20,7 +20,14 @@ pub fn parse_line(
     lineno: usize,
     ctx: &ParseContext,
 ) -> Option<InlineTask> {
-    let m = ctx.keyword_re().find(line)?;
+    let re = ctx.keyword_re();
+    let m = if ctx.skip_quoted() {
+        // First match not inside a "..." or `...` region (string literal / code span).
+        re.find_iter(line)
+            .find(|cand| !is_inside_quotes(line, cand.start()))?
+    } else {
+        re.find(line)?
+    };
     let keyword = m.as_str().to_string();
     let rest = &line[m.end()..];
 
@@ -87,6 +94,31 @@ fn strip_comment_close(mut s: &str) -> &str {
         }
     }
     s
+}
+
+/// True if `pos` (a byte offset) lies within a `"..."` or `` `...` `` region
+/// on `line`. Such a keyword is data (a string literal or inline-code span),
+/// not a task annotation. Single quotes are deliberately ignored so
+/// apostrophes in prose (`don't`) cannot cause false negatives. A backslash
+/// escapes the following byte, so `"a\"b"` closes correctly.
+fn is_inside_quotes(line: &str, pos: usize) -> bool {
+    let bytes = line.as_bytes();
+    let mut in_dq = false;
+    let mut in_bt = false;
+    let mut i = 0;
+    while i < pos {
+        match bytes[i] {
+            b'\\' => {
+                i += 2;
+                continue;
+            }
+            b'"' => in_dq = !in_dq,
+            b'`' => in_bt = !in_bt,
+            _ => {}
+        }
+        i += 1;
+    }
+    in_dq || in_bt
 }
 
 #[cfg(test)]
@@ -219,5 +251,68 @@ mod tests {
             t.metadata.tags,
             vec!["arch".to_string(), "perf".to_string()]
         );
+    }
+
+    #[test]
+    fn double_quoted_keyword_is_skipped() {
+        // A keyword inside a double-quoted string literal is data, not a task.
+        assert!(parse_line("    \"TODO\".into()", Path::new("a.rs"), 1, &ctx()).is_none());
+    }
+
+    #[test]
+    fn backtick_quoted_keyword_is_skipped() {
+        // Markdown inline-code span.
+        assert!(parse_line("see `TODO` here", Path::new("a.md"), 1, &ctx()).is_none());
+    }
+
+    #[test]
+    fn real_task_after_a_string_still_matches() {
+        let t = parse_line(
+            r#"    "x" // TODO: real task"#,
+            Path::new("a.rs"),
+            1,
+            &ctx(),
+        )
+        .unwrap();
+        assert_eq!(t.keyword, "TODO");
+        assert_eq!(t.description, "real task");
+    }
+
+    #[test]
+    fn first_unquoted_match_wins() {
+        // The quoted keyword is ignored; the later real keyword is reported.
+        let t = parse_line(
+            "\"TODO\" // FIXME: the real one",
+            Path::new("a.rs"),
+            1,
+            &ctx(),
+        )
+        .unwrap();
+        assert_eq!(t.keyword, "FIXME");
+        assert_eq!(t.description, "the real one");
+    }
+
+    #[test]
+    fn single_quoted_keyword_still_matches() {
+        // Single quotes are not delimiters, so apostrophes can't hide tasks.
+        let t = parse_line("# 'TODO' in a shell string", Path::new("a.sh"), 1, &ctx()).unwrap();
+        assert_eq!(t.keyword.to_ascii_uppercase(), "TODO");
+    }
+
+    #[test]
+    fn escaped_quote_does_not_leave_string_state_open() {
+        // The inner `\"` is escaped; the string closes before the real `TODO`.
+        let t = parse_line(r#"    "a\"b" // TODO: real"#, Path::new("a.rs"), 1, &ctx()).unwrap();
+        assert_eq!(t.keyword, "TODO");
+    }
+
+    #[test]
+    fn skip_disabled_matches_quoted_keyword() {
+        // Opting out restores first-match behavior.
+        let mut c = Config::default();
+        c.scan.skip_quoted_keywords = false;
+        let ctx_no_skip = ParseContext::from_config(&c).unwrap();
+        let t = parse_line("    \"TODO\".into()", Path::new("a.rs"), 1, &ctx_no_skip).unwrap();
+        assert_eq!(t.keyword, "TODO");
     }
 }

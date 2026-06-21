@@ -425,7 +425,7 @@ When trawl's defaults don't match your content.
 
 ```toml
 [scan]
-keywords = ["TODO", "FIXME", "HACK", "XXX", "BUG", "NOTE"]
+keywords = ["TODO", "FIXME", "HACK", "XXX", "BUG"]
 keyword_case_sensitive = false
 goal_section_names = ["GOAL TRACKER", "TODO"]
 include = []                      # empty = all file types

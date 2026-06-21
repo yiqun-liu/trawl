@@ -28,6 +28,8 @@ pub struct ParseContext {
     goal_section_names: Vec<String>,
     /// Table header field → keyword list, for column mapping.
     headers: HashMap<String, Vec<String>>,
+    /// When true, skip keyword matches inside `"..."` or `` `...` `` regions.
+    skip_quoted: bool,
 }
 
 impl ParseContext {
@@ -59,12 +61,18 @@ impl ParseContext {
             tokens: config.tokens.clone(),
             goal_section_names: config.scan.goal_section_names.clone(),
             headers: config.headers.clone(),
+            skip_quoted: config.scan.skip_quoted_keywords,
         })
     }
 
     /// The compiled keyword matcher (used by the inline parser).
     pub(crate) fn keyword_re(&self) -> &Regex {
         &self.keyword_re
+    }
+
+    /// Whether to skip keyword matches inside string literals / code spans.
+    pub(crate) fn skip_quoted(&self) -> bool {
+        self.skip_quoted
     }
 
     /// Token field → prefix map (used by metadata extraction).

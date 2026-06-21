@@ -510,7 +510,7 @@ KEYWORD [(scope)][: or space] description metadata_token*
 
 | Component | Required? | Description |
 |-----------|-----------|-------------|
-| Keyword | Yes | One of the configured keywords (default: `TODO`, `FIXME`, `HACK`, `XXX`, `BUG`, `NOTE`) |
+| Keyword | Yes | One of the configured keywords (default: `TODO`, `FIXME`, `HACK`, `XXX`, `BUG`) |
 | Scope | No | `(name)` — module or area grouping |
 | Separator | Yes | `:` or space between keyword/scope and description |
 | Description | Yes | Free text (everything before first metadata token) |
@@ -522,8 +522,8 @@ KEYWORD [(scope)][: or space] description metadata_token*
 inline_task      ::= keyword scope? sep text
 
 keyword          ::= configured keyword
-                   (default: "TODO" | "FIXME" | "HACK" | "XXX" | "BUG" | "NOTE",
-                   case-insensitive by default)
+                   (default: "TODO" | "FIXME" | "HACK" | "XXX" | "BUG",
+                    case-insensitive by default)
 
 scope            ::= "(" scope_name ")"
 scope_name       ::= any text except ")"
@@ -546,7 +546,6 @@ Different keywords imply different default priorities:
 | `HACK` | `med` | Workaround that should be cleaned up |
 | `XXX` | `med` | Warning or caution about the code |
 | `BUG` | `high` | Confirmed bug |
-| `NOTE` | *(none)* | Informational annotation |
 
 Explicit `!priority` overrides the keyword default.
 
@@ -563,6 +562,32 @@ Minimal:            TODO
 ```
 
 All five forms are valid. Missing fields default to `None`.
+
+### String-literal and Code-span Skipping
+
+A keyword that appears inside a double-quoted region or a backtick-delimited
+inline code span is treated as **data**, not a task annotation, and is not
+reported. This avoids false positives where the keyword is a string literal
+(`"TODO".into()`), a test fixture, or prose that merely mentions the keyword.
+
+It is enabled by default; set `scan.skip_quoted_keywords = false` to restore
+raw first-match behavior.
+
+```
+"TODO".into()       →  skipped (string literal)
+see `FIXME` here    →  skipped (code span)
+// TODO: real task  →  reported (the annotation itself)
+"x" // TODO: after  →  reported (keyword is outside the string)
+```
+
+Notes:
+- Single quotes are **not** delimiters. Apostrophes in prose (`don't`) would
+  otherwise open a string that never closes and hide later keywords on the
+  line; keywords in single-quoted strings (e.g. Python `'TODO'`) are still
+  reported.
+- A backslash escapes the next byte, so `"a\"b"` closes correctly.
+- The check is per-line and language-agnostic; it does not track multi-line
+  string or block-comment state.
 
 ### Context Detection
 

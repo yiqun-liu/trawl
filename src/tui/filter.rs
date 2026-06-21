@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn priority_filter_matches_set_priority() {
-        // A parsed FIXME task carries priority High (applied by the parser).
+        // A parsed `FIXME` task carries priority High (applied by the parser).
         let high = Metadata {
             priority: Some(Priority::High),
             ..Default::default()
