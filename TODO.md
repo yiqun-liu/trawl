@@ -75,12 +75,12 @@ For syntax specification, see `docs/syntax.md`.
   - [x] Implement Tab-based view switching (Goals and Inline Tasks)
   - [x] Implement app state struct (current view, filter state, sort mode)
   - [x] Implement clean terminal restoration on exit / panic
-- [ ] TUI Goals View
+- [x] TUI Goals View
   - [x] Render goal list (title, location badge, progress %)
   - [x] Render progress bars for each goal
   - [x] Implement inline expand/collapse of checkbox tree
   - [x] Render milestone per-group ratios (e.g., `2/3`)
-  - [ ] Render task metadata (priority badge, owner, tags)
+  - [x] Render task metadata (priority badge, owner, tags)
 - [x] TUI Inline Tasks View
   - [x] Build directory tree structure from scan results
   - [x] Render foldable tree nodes (directories, files, tasks)
@@ -97,18 +97,18 @@ For syntax specification, see `docs/syntax.md`.
 
 ### Phase 2 — Interaction
 
-- [ ] Filtering
+- [x] Filtering
   - [x] Implement keyword filter (only `FIXME`, etc.)
   - [x] Implement tag filter (only `#security`, etc.)
   - [x] Implement priority filter (only `!high`, etc.)
   - [x] Implement owner filter (only `@yiqun`, etc.)
   - [x] Implement full-text search (substring in descriptions)
   - [x] Implement stale-only filter (depends on Phase 3 stale detection)
-  - [ ] Implement path glob filter (`impl/kernel/**/*.c`) — substring match for now
+  - [x] Implement path glob filter (`impl/kernel/**/*.c`)
   - [x] Add filter UI (popup or prompt)
 - [x] Sorting
   - [x] Implement priority sort (high to med to low to untagged)
-  - [ ] Implement age sort (oldest first — depends on Phase 3 git blame)
+  - [x] Implement age sort (oldest first — depends on Phase 3 git blame)
   - [x] Implement file path sort (alphabetical, default)
   - [x] Implement keyword sort (group all FIXMEs, then TODOs, etc.)
   - [x] Add sort mode cycling (`s` key)
