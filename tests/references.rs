@@ -200,3 +200,61 @@ fn regression_existing_trackers_still_parse() {
     // the same flat checkbox structure.
     let _ = parse_rel("ref-target.md", "ref-target.md");
 }
+
+#[test]
+fn checkbox_form_broken_reference_does_not_count_toward_progress() {
+    // A done task alongside a checkbox-form broken reference. The broken
+    // reference must NOT count as a not-done leaf — only the real task
+    // participates, so progress is 100% (without the fix it would be 50%).
+    let md = "# Dead Ref Source\n\n## GOAL TRACKER\n\n- [x] real task\n- [ ] [[does-not-exist]]\n";
+    let mut goals = vec![goal::parse(md, Path::new("dead.md"), &ctx()).unwrap()];
+    resolve::resolve_references(&mut goals, &empty_scanned());
+
+    let source = &goals[0];
+    let broken = source
+        .items
+        .iter()
+        .find(|i| i.is_dead_reference())
+        .expect("a dead reference is present");
+    assert!(matches!(
+        &broken.reference,
+        Some(Reference::Broken { reason, .. }) if *reason == BrokenReason::NotFound
+    ));
+    assert!(
+        broken.is_checkbox(),
+        "broken ref retains its checkbox state but must not count"
+    );
+    assert!(
+        (source.progress() - 1.0).abs() < 1e-9,
+        "progress was {}",
+        source.progress()
+    );
+}
+
+#[test]
+fn checkbox_form_cycle_reference_does_not_count_toward_progress() {
+    // a -> b; b contains a done task and a back-reference to a. The cloned
+    // back-reference becomes Cycle and must NOT count as a not-done leaf —
+    // only the done task participates, so a's progress is 100% (without the
+    // fix it would be 50%).
+    let a = "# Cycle A\n\n## GOAL TRACKER\n\n- [ ] [[cb]]\n";
+    let b = "# Cycle B\n\n## GOAL TRACKER\n\n- [x] real task\n- [ ] [[ca]]\n";
+    let mut goals = vec![
+        goal::parse(a, Path::new("ca.md"), &ctx()).unwrap(),
+        goal::parse(b, Path::new("cb.md"), &ctx()).unwrap(),
+    ];
+    resolve::resolve_references(&mut goals, &empty_scanned());
+
+    let a = goals.iter().find(|g| g.title == "Cycle A").unwrap();
+    assert!(
+        a.items
+            .iter()
+            .any(|i| i.children.iter().any(|c| c.is_dead_reference())),
+        "expected a cycle marker in a's expanded subtree"
+    );
+    assert!(
+        (a.progress() - 1.0).abs() < 1e-9,
+        "progress was {}",
+        a.progress()
+    );
+}

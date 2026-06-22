@@ -217,6 +217,28 @@ impl GoalItem {
     pub fn is_group(&self) -> bool {
         matches!(self.state, NodeState::Group)
     }
+
+    /// True if this node carries a reference that resolved to [`Reference::Broken`]
+    /// or [`Reference::Cycle`]. Such nodes are dead ends — they carry no
+    /// completable work — so they never count toward leaf-ratio progress,
+    /// regardless of whether the user wrote a checkbox on the reference line.
+    pub fn is_dead_reference(&self) -> bool {
+        matches!(
+            &self.reference,
+            Some(Reference::Broken { .. }) | Some(Reference::Cycle { .. })
+        )
+    }
+
+    /// Count `(total, done)` leaves in this node's subtree. A leaf is a node
+    /// with no children, a checkbox state, and no dead reference. This is the
+    /// single source of truth for leaf counting — display code should call
+    /// this rather than re-implementing the walk.
+    pub fn leaf_counts(&self) -> (usize, usize) {
+        let mut total = 0usize;
+        let mut done = 0usize;
+        count_leaves(self, &mut total, &mut done);
+        (total, done)
+    }
 }
 
 /// One parsed `## GOAL TRACKER` section.
@@ -229,9 +251,9 @@ pub struct Goal {
 }
 
 impl Goal {
-    /// Leaf-ratio progress in `[0.0, 1.0]`, where a leaf is any [`GoalItem`]
-    /// with no children. A goal with **zero leaf tasks** returns `0.0`
-    /// (no division is performed).
+    /// Leaf-ratio progress in `[0.0, 1.0]`, where a leaf is a [`GoalItem`]
+    /// with no children, a checkbox state, and no dead reference. A goal
+    /// with **zero leaves** returns `0.0` (no division is performed).
     pub fn progress(&self) -> f64 {
         let (total, done) = leaf_counts(&self.items);
         if total == 0 {
@@ -248,8 +270,9 @@ impl Goal {
 }
 
 /// Count `(total_leaf, done_leaf)` across a forest of items. Only checkbox
-/// leaves participate — group leaves (empty subsection, broken reference,
-/// cycle marker) are planned placeholders and do not affect progress.
+/// leaves participate — group leaves (empty subsection headings) and dead
+/// references (Broken/Cycle, in any form) are planned placeholders and do
+/// not affect progress.
 fn leaf_counts(items: &[GoalItem]) -> (usize, usize) {
     let mut total = 0usize;
     let mut done = 0usize;
@@ -261,11 +284,14 @@ fn leaf_counts(items: &[GoalItem]) -> (usize, usize) {
 
 fn count_leaves(item: &GoalItem, total: &mut usize, done: &mut usize) {
     if item.children.is_empty() {
-        // Leaf: count only if it carries a checkbox.
+        // Leaf: count only if it carries a checkbox and is not a dead
+        // reference (a Broken/Cycle reference carries no completable work).
         if let NodeState::Checkbox { checked } = item.state {
-            *total += 1;
-            if checked {
-                *done += 1;
+            if !item.is_dead_reference() {
+                *total += 1;
+                if checked {
+                    *done += 1;
+                }
             }
         }
     } else {
@@ -285,7 +311,7 @@ pub enum Status {
 
 impl Status {
     /// `1.0` → [`Status::Completed`], `0.0` → [`Status::Planned`] (this includes
-    /// goals with zero leaf tasks), anything in between → [`Status::Active`].
+    /// goals with zero leaves), anything in between → [`Status::Active`].
     pub fn from_progress(p: f64) -> Self {
         if p >= 1.0 {
             Status::Completed

@@ -1366,37 +1366,13 @@ fn goal_item_span(goals: &[Goal], gi: usize, path: &[usize]) -> Option<(PathBuf,
     Some((item.span.path.clone(), item.span.line))
 }
 
-/// Count `(total_leaf, done_leaf)` beneath an item.
-fn item_leaf_counts(item: &GoalItem) -> (usize, usize) {
-    let mut total = 0usize;
-    let mut done = 0usize;
-    count_item_leaves(item, &mut total, &mut done);
-    (total, done)
-}
-
-fn count_item_leaves(item: &GoalItem, total: &mut usize, done: &mut usize) {
-    if item.children.is_empty() {
-        // Count only checkbox leaves; group leaves are planned placeholders.
-        if let NodeState::Checkbox { checked } = item.state {
-            *total += 1;
-            if checked {
-                *done += 1;
-            }
-        }
-    } else {
-        for child in &item.children {
-            count_item_leaves(child, total, done);
-        }
-    }
-}
-
 /// A milestone is "done" when it is itself checked and all its checkbox
 /// leaves are checked. Group nodes are never "done" (no checkbox state).
 fn subtree_done(item: &GoalItem) -> bool {
     if item.checked() != Some(true) {
         return false;
     }
-    let (total, done) = item_leaf_counts(item);
+    let (total, done) = item.leaf_counts();
     total > 0 && done == total
 }
 
