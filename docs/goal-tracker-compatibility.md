@@ -71,6 +71,14 @@ matches a configured section name.
 | First-match-only | Only the first matching heading in a file is parsed. A second `## GOAL TRACKER` is ignored. |
 | Section boundary | Content extends until the next heading of **same or higher level**, or end of file. |
 
+> **Section name vs. inline keyword overlap**: `TODO` is both a default
+> goal-section name and a default inline keyword. By design, a heading
+> carrying a keyword is also captured as an inline task (so `## TODO:
+> review this` is both a section and a TODO). A bare `## TODO` section
+> heading therefore also shows up in inline-task results. Prefer
+> `## GOAL TRACKER` for a section that is purely a tracker, reserving
+> `## TODO` for headings that double as reminders.
+
 ```markdown
 # CS146s: The Modern Software Developer
 
