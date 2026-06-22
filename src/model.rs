@@ -181,6 +181,11 @@ pub struct GoalItem {
     /// Cross-document reference, if this node originated from a `[[...]]`
     /// wikilink or `[text](path)` markdown link. `None` for normal nodes.
     pub reference: Option<Reference>,
+    /// Diagnostic warning for content trawl could not parse — today, a
+    /// malformed or skipped table. When set, the item renders as a `⚠`
+    /// warning leaf in the TUI and surfaces in `--no-tui` warnings.
+    /// Orthogonal to `reference` (a malformed table is not a reference).
+    pub warning: Option<String>,
     pub children: Vec<GoalItem>,
     pub span: Span,
     pub blame_author: Option<String>,
@@ -333,6 +338,7 @@ mod tests {
             state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
             reference: None,
+            warning: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from("x.md"),
@@ -350,6 +356,7 @@ mod tests {
             state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
             reference: None,
+            warning: None,
             children,
             span: Span {
                 path: PathBuf::from("x.md"),

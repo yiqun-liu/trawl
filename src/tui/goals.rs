@@ -371,6 +371,7 @@ mod tests {
             state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
             reference: None,
+            warning: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from("x.md"),
@@ -388,6 +389,7 @@ mod tests {
             state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
             reference: None,
+            warning: None,
             children,
             span: Span {
                 path: PathBuf::from("x.md"),
@@ -405,6 +407,7 @@ mod tests {
             state: NodeState::Group,
             metadata: Metadata::default(),
             reference: None,
+            warning: None,
             children,
             span: Span {
                 path: PathBuf::from("x.md"),

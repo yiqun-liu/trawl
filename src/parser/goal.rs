@@ -112,6 +112,7 @@ fn parse_body(
                 state: NodeState::Group,
                 metadata,
                 reference: None,
+                warning: None,
                 children: Vec::new(),
                 span: Span {
                     path: PathBuf::from(rel),
@@ -143,6 +144,7 @@ fn parse_body(
                 state: NodeState::Checkbox { checked },
                 metadata,
                 reference,
+                warning: None,
                 children: Vec::new(),
                 span: Span {
                     path: PathBuf::from(rel),
@@ -184,6 +186,7 @@ fn parse_body(
                 state: NodeState::Group,
                 metadata,
                 reference,
+                warning: None,
                 children: Vec::new(),
                 span: Span {
                     path: PathBuf::from(rel),
@@ -222,6 +225,7 @@ fn parse_body(
                     raw_target,
                     display_text,
                 }),
+                warning: None,
                 children: Vec::new(),
                 span: Span {
                     path: PathBuf::from(rel),
@@ -363,6 +367,7 @@ fn parse_table(block: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> (usiz
             state: NodeState::Checkbox { checked },
             metadata,
             reference: None,
+            warning: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from(rel),

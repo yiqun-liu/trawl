@@ -196,6 +196,7 @@ mod tests {
             state: NodeState::Checkbox { checked },
             metadata: Metadata::default(),
             reference: None,
+            warning: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from(ref_path),
@@ -216,6 +217,7 @@ mod tests {
                 raw_target: raw_target.into(),
                 display_text: display_text.into(),
             }),
+            warning: None,
             children: Vec::new(),
             span: Span {
                 path: PathBuf::from(ref_path),
