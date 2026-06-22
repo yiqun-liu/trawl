@@ -265,6 +265,30 @@ fn parse_body(
             }
             i += consumed;
             continue;
+        } else if is_table_line(line)
+            && body
+                .get(i + 1)
+                .is_some_and(|(_, next)| is_table_line(next) && !is_table_sep(next))
+        {
+            // Malformed table: a header-looking pipe row immediately followed
+            // by another pipe row with no separator between them. Emit a
+            // warning marker rather than silently dropping the block.
+            let mut consumed = 0;
+            while body
+                .get(i + consumed)
+                .is_some_and(|(_, l)| is_table_line(l))
+            {
+                consumed += 1;
+            }
+            let lineno = body[i].0;
+            let parent = heading_stack.last().map(|&(_, idx)| idx);
+            arena.push(Node {
+                parent,
+                item: table_warning_marker(rel, lineno, "malformed table: missing separator row"),
+                drop_if_leaf: false,
+            });
+            i += consumed;
+            continue;
         }
 
         i += 1; // ignored line
@@ -335,6 +359,28 @@ fn should_prune(idx: usize, arena: &[Node], children_of: &[Vec<usize>]) -> bool 
     arena[idx].drop_if_leaf && children_of[idx].is_empty()
 }
 
+/// Build a non-checkbox warning marker leaf for a table trawl could not
+/// parse (malformed structure, or no task column). The marker carries the
+/// human-readable `message` in [`GoalItem::warning`] so the TUI and
+/// `--no-tui` surface it consistently.
+fn table_warning_marker(rel: &Path, line: usize, message: &str) -> GoalItem {
+    GoalItem {
+        text: String::new(),
+        state: NodeState::Group,
+        metadata: Metadata::default(),
+        reference: None,
+        warning: Some(message.to_string()),
+        children: Vec::new(),
+        span: Span {
+            path: PathBuf::from(rel),
+            line,
+        },
+        blame_author: None,
+        blame_date: None,
+        blame_commit: None,
+    }
+}
+
 /// Parse a contiguous table block beginning at `block[0]`. Returns the number
 /// of lines consumed and the flat list of leaf items.
 fn parse_table(block: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> (usize, Vec<GoalItem>) {
@@ -355,7 +401,14 @@ fn parse_table(block: &[(usize, &str)], rel: &Path, ctx: &ParseContext) -> (usiz
     // A table without a task column cannot be parsed.
     let has_task = colmap.iter().any(|c| c.as_deref() == Some("task"));
     if !has_task {
-        return (consumed, Vec::new());
+        return (
+            consumed,
+            vec![table_warning_marker(
+                rel,
+                block[0].0,
+                "table skipped: no task column",
+            )],
+        );
     }
 
     let mut items = Vec::new();
@@ -727,13 +780,41 @@ mod tests {
     }
 
     #[test]
-    fn malformed_table_without_task_column_is_skipped() {
+    fn table_without_task_column_produces_warning_marker() {
         let md = "## GOAL TRACKER\n\n| State | Notes |\n|-------|-------|\n| done | hi |\n";
         let goal = parse(md, Path::new("x.md"), &ctx()).unwrap();
-        assert!(
-            goal.items.is_empty(),
-            "table with no task column is skipped"
+        assert_eq!(
+            goal.items.len(),
+            1,
+            "table with no task column yields a warning marker, not silence"
         );
+        let w = goal.items[0]
+            .warning
+            .as_deref()
+            .expect("marker carries a warning");
+        assert!(
+            w.contains("no task column"),
+            "warning mentions no task column: {w:?}"
+        );
+    }
+
+    #[test]
+    fn malformed_table_missing_separator_produces_warning_marker() {
+        // Header directly followed by a data row — no `|---|` separator.
+        let md = "## GOAL TRACKER\n\n| Task | Priority |\n| a | high |\n| b | low |\n";
+        let goal = parse(md, Path::new("x.md"), &ctx()).unwrap();
+        assert_eq!(
+            goal.items.len(),
+            1,
+            "malformed table collapses to one warning marker"
+        );
+        let m = &goal.items[0];
+        let w = m.warning.as_deref().expect("marker carries a warning");
+        assert!(
+            w.contains("missing separator"),
+            "warning mentions missing separator: {w:?}"
+        );
+        assert!(m.children.is_empty());
     }
 
     #[test]
