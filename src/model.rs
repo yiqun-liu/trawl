@@ -148,7 +148,7 @@ pub enum Reference {
         target_path: PathBuf,
         display_text: String,
     },
-    /// Target not found / not scanned / has no goal tracker.
+    /// Target not found, or scanned but has no goal tracker.
     Broken {
         raw_target: String,
         reason: BrokenReason,
@@ -161,10 +161,8 @@ pub enum Reference {
 /// Why a [`Reference::Broken`] reference could not be resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrokenReason {
-    /// File does not exist on disk.
+    /// File does not exist on disk (or was excluded from the scan).
     NotFound,
-    /// File exists but was not scanned (excluded, binary, etc.).
-    NotScanned,
     /// File was scanned but has no goal tracker section.
     NoGoalTracker,
 }

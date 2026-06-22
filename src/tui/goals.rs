@@ -239,7 +239,6 @@ fn push_item(
         Some(Reference::Broken { raw_target, reason }) => {
             let reason_str = match reason {
                 BrokenReason::NotFound => "not found",
-                BrokenReason::NotScanned => "not scanned",
                 BrokenReason::NoGoalTracker => "no goal tracker",
             };
             ("⚠ ".to_string(), format!("  ({reason_str}: {raw_target})"))
