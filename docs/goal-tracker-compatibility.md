@@ -178,6 +178,14 @@ Tables provide a compact, columnar format for flat task lists with
 per-task metadata. Each row is a **leaf task** — no milestone/task
 distinction.
 
+**Malformed and skipped tables are not dropped silently.** If a table is
+missing its separator row, or has no column that maps to task, trawl
+emits a `⚠` warning marker at that position rather than ignoring the
+block. The marker appears in the TUI goals view and in the
+`--no-tui` `warnings:` section (alongside broken-reference and cycle
+markers), so a forgotten separator or an unregistered task column never
+causes quiet data loss.
+
 #### Column detection
 
 Trawl maps columns by scanning header names with **case-insensitive
@@ -185,7 +193,7 @@ substring matching** against configurable keyword lists:
 
 | Field | Default keywords | Required? |
 |-------|-----------------|-----------|
-| Task description | `task`, `item`, `name`, `todo`, `work` | **Yes** — at least one column must map to "task", otherwise the entire table is skipped |
+| Task description | `task`, `item`, `name`, `todo`, `work` | **Yes** — at least one column must map to "task", otherwise the table is replaced by a `⚠ (table skipped: no task column)` warning marker |
 | Completion state | `state`, `status`, `done`, `progress`, `check` | Optional — if no state column is found, all rows default to not-done |
 | Owner | `owner`, `assignee`, `who` | Optional |
 | Priority | `priority`, `pri` | Optional |
@@ -587,7 +595,7 @@ Ordered by pipeline stage — check each before moving to the next:
     - [ ] Not in a dot-directory or dotfile (unless `scan_hidden = true`), and not matched by an `exclude` glob
     - [ ] Within `max_file_size`
     - [ ] Contains a goal-tracker section heading (`GOAL TRACKER` / `TODO` by default) — otherwise the reference becomes a `⚠ (no goal tracker: …)` marker
-- [ ] Broken refs render with `⚠`; cycles render with `↻` — both are visible in `--no-tui` output
+- [ ] No `⚠` markers (broken refs, malformed/skipped tables) and no `↻` cycles — all are listed in the `--no-tui` `warnings:` section
 
 **Metadata**:
 
@@ -603,6 +611,7 @@ Ordered by pipeline stage — check each before moving to the next:
 **Verification**:
 
 - [ ] Run `trawl --path <dir> --no-tui` and confirm every expected goal appears with correct progress/status
+- [ ] The `warnings:` section is empty — a non-empty list flags malformed/skipped tables, broken references, or cycles that would otherwise be silent
 
 ### Diagnosing missing goals
 
