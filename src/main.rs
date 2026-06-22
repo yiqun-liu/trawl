@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use clap::Parser;
 
-use trawl::{scan, Config, InlineTask, ParseContext, Priority, ScanOptions, ScanResult, Status};
+use trawl::{
+    scan, BrokenReason, Config, Goal, GoalItem, InlineTask, ParseContext, Priority, Reference,
+    ScanOptions, ScanResult, Span, Status,
+};
 
 /// `TODO` Repository Annotation Work List.
 ///
@@ -70,6 +73,12 @@ fn print_summary(result: &ScanResult) {
         );
     }
 
+    let warnings = collect_warnings(&result.goals);
+    println!("warnings: {}", warnings.len());
+    for (span, msg) in &warnings {
+        println!("  {}:{}  {}", span.path.display(), span.line, msg);
+    }
+
     let (high, med, low, other, untagged) = priority_breakdown(&result.inline_tasks);
     println!(
         "inline tasks: {}  (high:{} med:{} low:{} other:{} untagged:{})",
@@ -117,6 +126,46 @@ fn priority_breakdown(tasks: &[InlineTask]) -> (usize, usize, usize, usize, usiz
         }
     }
     (high, med, low, other, untagged)
+}
+
+/// Collect diagnostic markers from every goal tree: table warnings
+/// (`GoalItem::warning`), broken references, and cycles. Each entry pairs the
+/// marker's source span with a pre-rendered `⚠`/`↻` message, so `--no-tui`
+/// surfaces the same markers the TUI shows (which the summary historically did
+/// not — markers lived only in the goal tree).
+fn collect_warnings(goals: &[Goal]) -> Vec<(Span, String)> {
+    let mut out = Vec::new();
+    for goal in goals {
+        collect_warnings_from_items(&goal.items, &mut out);
+    }
+    out
+}
+
+fn collect_warnings_from_items(items: &[GoalItem], out: &mut Vec<(Span, String)>) {
+    for item in items {
+        if let Some(w) = &item.warning {
+            out.push((item.span.clone(), format!("⚠ {w}")));
+        }
+        match &item.reference {
+            Some(Reference::Broken { raw_target, reason }) => {
+                let reason_str = match reason {
+                    BrokenReason::NotFound => "not found",
+                    BrokenReason::NoGoalTracker => "no goal tracker",
+                };
+                out.push((item.span.clone(), format!("⚠ ({reason_str}: {raw_target})")));
+            }
+            Some(Reference::Cycle { chain }) => {
+                let chain_str = chain
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(" → ");
+                out.push((item.span.clone(), format!("↻ (cycle: {chain_str})")));
+            }
+            _ => {}
+        }
+        collect_warnings_from_items(&item.children, out);
+    }
 }
 
 /// Initialize the logger. `verbose` selects `debug`, otherwise `warn`. Logs
@@ -172,5 +221,62 @@ fn conventional_log_path() -> PathBuf {
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
         PathBuf::from("trawl.log")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trawl::{Metadata, NodeState};
+
+    fn leaf_item(reference: Option<Reference>, warning: Option<String>) -> GoalItem {
+        GoalItem {
+            text: String::new(),
+            state: NodeState::Group,
+            metadata: Metadata::default(),
+            reference,
+            warning,
+            children: Vec::new(),
+            span: Span {
+                path: PathBuf::from("doc.md"),
+                line: 5,
+            },
+            blame_author: None,
+            blame_date: None,
+            blame_commit: None,
+        }
+    }
+
+    #[test]
+    fn collect_warnings_surfaces_table_warnings_and_broken_refs() {
+        // A goal whose tree contains a broken reference and a table warning.
+        let goal = Goal {
+            title: "T".into(),
+            source_file: PathBuf::from("doc.md"),
+            badge: "(root)".into(),
+            items: vec![
+                leaf_item(
+                    Some(Reference::Broken {
+                        raw_target: "missing.md".into(),
+                        reason: BrokenReason::NotFound,
+                    }),
+                    None,
+                ),
+                leaf_item(None, Some("malformed table: missing separator row".into())),
+            ],
+        };
+        let warnings = collect_warnings(&[goal]);
+        assert_eq!(warnings.len(), 2, "both markers surface");
+        assert!(
+            warnings[0].1.starts_with("⚠") && warnings[0].1.contains("not found"),
+            "broken ref renders with ⚠ and reason: {}",
+            warnings[0].1
+        );
+        assert!(
+            warnings[1].1.starts_with("⚠") && warnings[1].1.contains("missing separator"),
+            "table warning renders with ⚠: {}",
+            warnings[1].1
+        );
+        assert_eq!(warnings[0].0.line, 5, "span is preserved");
     }
 }
