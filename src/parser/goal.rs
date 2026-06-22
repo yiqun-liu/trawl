@@ -88,9 +88,24 @@ fn parse_body(
     // pops deeper ones off the top.
     let mut heading_stack: Vec<(usize, usize)> = Vec::new();
 
+    let mut in_code = false;
     let mut i = 0;
     while i < body.len() {
         let (lineno, line) = body[i];
+
+        // Fenced code block: a line starting with ``` or ~~~ opens or
+        // closes a code span. While inside, every line is ignored so that
+        // pipe-rows, `- [ ]`, etc. in a code block are not mistaken for
+        // tracker content (the parser does not otherwise special-case code).
+        if is_fence(line) {
+            in_code = !in_code;
+            i += 1;
+            continue;
+        }
+        if in_code {
+            i += 1;
+            continue;
+        }
 
         // Heading within the section: becomes a Group node.
         if let Some(caps) = heading_re().captures(line) {
@@ -515,6 +530,14 @@ fn is_table_line(line: &str) -> bool {
     line.contains('|')
 }
 
+/// Whether `line` opens or closes a fenced code block — three or more
+/// backticks or tildes at the start (ignoring leading whitespace), per the
+/// CommonMark fence rule. The fence line itself is not tracker content.
+fn is_fence(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("```") || t.starts_with("~~~")
+}
+
 fn is_table_sep(line: &str) -> bool {
     if !line.contains('|') {
         return false;
@@ -815,6 +838,30 @@ mod tests {
             "warning mentions missing separator: {w:?}"
         );
         assert!(m.children.is_empty());
+    }
+
+    #[test]
+    fn fenced_code_block_is_ignored() {
+        // A fenced block containing a fake checkbox and two pipe-rows (which
+        // would otherwise look like a malformed table) must produce no items
+        // and no warning marker. Only the real task after the fence counts.
+        let md =
+            "## GOAL TRACKER\n\n```\n- [ ] fake task\n| a | b |\n| c | d |\n```\n- [x] real task\n";
+        let goal = parse(md, Path::new("x.md"), &ctx()).unwrap();
+        assert_eq!(goal.items.len(), 1, "only the real task after the fence");
+        assert_eq!(goal.items[0].text, "real task");
+        assert!(
+            goal.items[0].warning.is_none(),
+            "no malformed-table marker from the fenced block"
+        );
+    }
+
+    #[test]
+    fn tilde_fence_is_ignored() {
+        let md = "## GOAL TRACKER\n\n~~~\n- [ ] fake\n~~~\n- [ ] real\n";
+        let goal = parse(md, Path::new("x.md"), &ctx()).unwrap();
+        assert_eq!(goal.items.len(), 1);
+        assert_eq!(goal.items[0].text, "real");
     }
 
     #[test]
