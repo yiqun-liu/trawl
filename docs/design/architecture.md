@@ -106,14 +106,23 @@ pub struct InlineTask {
     pub blame_commit: Option<String>,
 }
 
-/// A checkbox node OR a table row (unified).
-/// Empty `children` => task; non-empty => milestone.
+/// One node in a goal-tracker tree.
+///
+/// `state` (a checkbox or a checkboxless group) is orthogonal to
+/// `children` (leaf vs internal) and to `reference` (an optional
+/// cross-document reference). Empty `children` => task or group leaf;
+/// non-empty => milestone or group node. See `src/model.rs` for the
+/// `NodeState` and `Reference` enum definitions.
 pub struct GoalItem {
     pub text: String,
-    pub checked: bool,
+    pub state: NodeState,              // Checkbox { checked } | Group
     pub metadata: Metadata,
+    pub reference: Option<Reference>,  // [[wikilink]] / [text](path), if any
     pub children: Vec<GoalItem>,
     pub span: Span,
+    pub blame_author: Option<String>,  // populated when display.show_git_blame
+    pub blame_date: Option<chrono::NaiveDateTime>,
+    pub blame_commit: Option<String>,
 }
 
 /// One parsed ## GOAL TRACKER section.
@@ -130,8 +139,9 @@ pub enum Status { Planned, Active, Completed }
 ### Derived behaviour
 
 - `Goal::progress() -> f64` — leaf ratio: `done_leaf_count / total_leaf_count`,
-  where a leaf is any `GoalItem` with empty `children`. **Zero leaf tasks →
-  `0.0`** (no division; status `Planned`).
+  where a leaf is a `GoalItem` with empty `children`, a `Checkbox` state, and
+  no `Broken`/`Cycle` reference. Group leaves and dead references do not
+  count. **Zero leaves → `0.0`** (no division; status `Planned`).
 - `Status::from_progress(p)` — `1.0` → `Completed`, `0.0` → `Planned`,
   otherwise `Active`.
 - `GoalItem::is_milestone()` — `!self.children.is_empty()`.

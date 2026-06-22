@@ -104,27 +104,45 @@ is parsed:
 
 What format trawl parses inside a detected section.
 
-Within the tracker section, trawl recognizes **four element types**:
-checkbox items, plain bullets (with children), subsection headings, and
-references (wikilinks or markdown links). Each contributes a different
-kind of tree node. Paragraphs, images, code blocks, and blank lines are
-ignored — letting you mix context notes and visual formatting freely.
+Within the tracker section, trawl reads content along **two independent
+dimensions** — **format** (how leaf items are written: checkboxes or
+tables) and **structure** (how items are grouped into a tree). Paragraphs,
+images, code blocks, and blank lines are ignored — letting you mix context
+notes and visual formatting freely.
 
-### Choosing a format
+### Format and structure
+
+**Format** — how leaf items are written:
 
 | Format | Best for | Trade-offs |
 |--------|----------|------------|
 | **Checkbox list** | Simple tracking, hierarchical goals (courses, book chapters, multi-phase projects) | Naturally expresses milestones → tasks via indentation. Lightweight — one line per item. Metadata tokens are inline. |
-| **Subsection headings** | Grouping large trackers into named phases | `### Title` becomes a group node (no checkbox) that owns the items beneath it. Heading level relative to the section determines nesting; a heading resets indentation context. |
-| **Plain-bullet groups** | Milestones without a `[ ]` state | `- Group` followed by indented children becomes a group node. Plain bullets without children are ignored — they stay as context notes. |
-| **Cross-document reference** | Multi-file objectives (epic across planning docs, learning track across chapter notes) | `[[target]]` or `[display](target)` pulls in another doc's tracker as a subtree. See [Cross-Document References](#cross-document-references). |
 | **Table** | Rich information per item (status, owner, priority, due, custom fields) | Compact for flat task lists with multiple columns. Each row is a **leaf task** — no milestone/task distinction. Hierarchy can be approximated by adding a `Level` or `Phase` column for the human reader, but trawl still treats every row as a flat leaf. |
 | **Mixed** | Both hierarchical structure and dense per-group metadata | Use checkboxes for the hierarchy, tables for groups that need per-item columns. Subsection headings between groups are structural. |
 
-**Guideline**: start with checkboxes. Add subsections when the tracker
-grows past a dozen items. Use cross-document references when an objective
-spans multiple files. Switch to tables when each item carries more than
-one tracked attribute beyond the task name itself.
+**Structure** — how items are grouped into a tree (group nodes), on top of any format:
+
+| Structure | Best for | Trade-offs |
+|-----------|----------|------------|
+| **Indentation** (checkbox-native) | Milestone → task within checkbox format | 2 spaces per level; the baseline hierarchy for checkbox lists (see [Checkbox items](#checkbox-items)). |
+| **Subsection headings** (`###`) | Grouping large trackers into named phases | `### Title` becomes a group node (no checkbox) that owns the items beneath it. Heading level relative to the section determines nesting; a heading resets indentation context. |
+| **Plain-bullet groups** | Group nodes without a checkbox state | `- Group` followed by indented children becomes a group node. Plain bullets without children are ignored — they stay as context notes. |
+| **Cross-document reference** | Multi-file objectives (epic across planning docs, learning track across chapter notes) | `[[target]]` or `[display](target)` pulls in another doc's tracker as a subtree. See [Cross-document references](#cross-document-references). |
+
+A heading **inside** the section is **structural** — it becomes a group
+node whose children are the items beneath it. The heading level relative
+to the section determines nesting: `####` inside `###` nests one level
+deeper. A heading **closes any open checkbox indentation context**, so
+items after it become children of the heading, not of the prior checkbox
+parent.
+
+**Guideline**:
+
+- **Format**: start with checkboxes. Switch to tables (or mixed) when each
+  item carries more than one tracked attribute beyond the task name itself.
+- **Structure**: start flat. Add subsection headings when the tracker grows
+  past a dozen items; use cross-document references when an objective spans
+  multiple files.
 
 ### Checkbox items
 
@@ -153,13 +171,6 @@ one tracked attribute beyond the task name itself.
   - [ ] Assignment 2
 - [ ] Buy textbook
 ```
-
-`###` and other headings **inside** the section are **structural** —
-they become group nodes whose children are the items beneath them. The
-heading level relative to the section determines nesting: `####` inside
-`###` nests one level deeper. A heading **closes any open checkbox
-indentation context**, so items after it become children of the heading,
-not of the prior checkbox parent.
 
 ### Tables
 
@@ -268,9 +279,33 @@ The reference resolves relative to the referencing doc's directory
 (`ml/llm/foundations/README.md` here). Optional `#anchor` suffixes are
 stripped before resolution — whole-doc inlining is performed today.
 
+Resolution keys on **file path**, not section name: the target just needs
+*some* recognized tracker section. Renaming a tracker section never breaks
+inbound references; moving or renaming the target *file* does.
+
+For a reference to resolve, the **target file** must independently pass
+every scan rule that any other scanned file does — trawl does not relax
+detection for referenced docs:
+
+- **Git-tracked** (unless `only_tracked = false`). A gitignored or
+  untracked target is invisible to trawl.
+- **Not in a dot-directory or dotfile** (unless `scan_hidden = true`),
+  and not matched by an `exclude` glob.
+- **Within `max_file_size`** (default `1MB`).
+- **Contains its own goal-tracker section** — a heading matching a
+  `goal_section_names` entry (`GOAL TRACKER` / `TODO` by default,
+  case-insensitive exact match). Without it the reference resolves to a
+  `⚠ (no goal tracker: …)` marker even though the file was scanned.
+
+These are the same rules listed under *Detection* above; they apply to
+the target independently of the referencing doc. A reference that
+renders as `⚠ (not found: …)` almost always means the target failed one
+of them — check `git ls-files <target>` and the exclude/hidden settings
+before assuming a syntax problem.
+
 | Outcome | Trigger | What the user sees |
 |---------|---------|---------------------|
-| **Resolved** | Target has a goal tracker | Imported subtree under the reference line. Text comes from the target's H1 (wikilink) or the link display text (markdown link). |
+| **Resolved** | Target has a goal tracker | Imported subtree under the reference line. Text comes from the target's H1 (wikilink, falling back to the filename if there is no H1) or the link display text (markdown link). |
 | **Broken: not found** | Target file is not in the scan set | `⚠ (not found: target)` leaf — no subtree. |
 | **Broken: no goal tracker** | Target was scanned but has no tracker | `⚠ (no goal tracker: target)` leaf — no subtree. |
 | **Cycle** | Target is already on the expansion chain (A → B → A) | `↻ (cycle: a → b → a)` leaf — expansion stops. |
@@ -328,6 +363,14 @@ In table rows, column-based values (from recognized headers like
 row has `@bob` in the task cell AND "alice" in the Assignee column, the
 owner is "alice".
 
+**Use bare values in cells, not token-prefixed ones.** The column header
+already identifies the field, so write `high` (not `!high`), `alice` (not
+`@alice`), `2025-12-01` (not `~2025-12-01`). A cell value is parsed
+literally: `!high` in a Priority cell does not match the `high`/`med`/`low`
+enum and falls through to the unrecognized-value bucket, defeating
+priority filtering and sorting. The `!`/`@`/`#`/`~` prefixes are for
+**inline use in free text only** (checkbox items, bullet text).
+
 ### Custom tokens
 
 Token prefixes are configurable via `[tokens]` in `.trawl.toml`. Add
@@ -379,18 +422,26 @@ put it in a custom "Notes" column rather than the state column.
 
 ### Progress (leaf ratio)
 
-All levels use **leaf ratio** — the ratio of done leaf tasks to total
-leaf tasks within the scope:
+All levels use **leaf ratio** — the ratio of done leaves to total leaves
+within the scope. A node counts as a **leaf** when it has no children, a
+checkbox state (checkbox tasks and table rows), and is **not a dead
+reference**. A *dead reference* — one that resolved to Broken or Cycle —
+carries no completable work, so it never counts, **regardless of whether
+the user wrote a checkbox on the reference line** (`- [ ] [[missing]]` is
+invisible to progress, just like a standalone broken `[[missing]]`).
+Empty group nodes (e.g. an isolated `###` heading) likewise do not count:
 
 | Scope | Formula |
 |-------|---------|
-| Leaf task (no children) | `1` if checked, `0` if not |
-| Milestone (has children) | `count(done leaves in subtree) / count(all leaves in subtree)` |
+| Leaf (checkbox/table row, no children) | `1` if checked, `0` if not |
+| Milestone (checkbox, has children) | `count(done leaves in subtree) / count(all leaves in subtree)` |
+| Group node (no checkbox, has children) | same formula as milestone |
+| Dead reference / empty heading | does not count — invisible to progress |
 | Goal | `count(done leaves) / count(all leaves)` |
 
-**Zero leaf tasks**: if a scope contains no leaf tasks (empty section,
-or milestones without tasks beneath them), progress is `0%` — no
-division by zero is performed.
+**Zero leaves**: if a scope contains no leaves (empty section, milestones
+without tasks beneath them, only group nodes, or only dead references),
+progress is `0%` — no division by zero is performed.
 
 ### Status
 
@@ -531,12 +582,18 @@ Ordered by pipeline stage — check each before moving to the next:
 - [ ] Reference lines are line-as-reference (`- [ ] [[target]]` or standalone `[[target]]`) — embedded refs like `"see [[x]] for details"` stay literal
 - [ ] Targets resolve relative to the referencing doc's directory
 - [ ] Targets end in `.md` (or omit the extension — trawl appends it)
+- [ ] **Target preconditions** — the referenced file, independently of the referencing doc, must satisfy:
+    - [ ] Git-tracked (`git ls-files <target>` shows it), unless `only_tracked = false`
+    - [ ] Not in a dot-directory or dotfile (unless `scan_hidden = true`), and not matched by an `exclude` glob
+    - [ ] Within `max_file_size`
+    - [ ] Contains a goal-tracker section heading (`GOAL TRACKER` / `TODO` by default) — otherwise the reference becomes a `⚠ (no goal tracker: …)` marker
 - [ ] Broken refs render with `⚠`; cycles render with `↻` — both are visible in `--no-tui` output
 
 **Metadata**:
 
 - [ ] Tokens are space-delimited (`!high @owner #tag ~date`)
 - [ ] `#tag` is for labels, `!priority` is for triage levels — never use `#high` for priority
+- [ ] Table cells use **bare** values (`high`, not `!high`) — token prefixes are inline-only
 
 **Config**:
 

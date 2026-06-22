@@ -105,16 +105,26 @@ Some intro text.                    ← ignored
 
 ### Content Within the Section
 
-Within the GOAL TRACKER section, the parser recognizes **four** element
-types:
+Goal-tracker content is described along **two independent dimensions**:
+*format* (how leaf items are written) and *structure* (how items are
+grouped into a tree). The two combine freely — any format may sit beneath
+any structural grouping.
 
-| Element | Syntax | Parsed as |
-|---------|--------|-----------|
-| Checkbox item | `- [x]` or `- [ ]` (at any indent) | Checkbox node in the tree (task or milestone, depending on children) |
-| Plain bullet | `- text` (no checkbox) | **Group node** if it has indented children; ignored otherwise (preserves context-note behavior) |
-| Subsection heading | `### title` (any level deeper than the section) | **Group node**; items beneath it become its children |
-| Reference | `[[target]]` or `[text](target)` on its own or inside a checkbox/bullet | Node carrying a `Reference`; resolved into a subtree of the target doc in Pass 2 |
-| Table | `\| ... \|` with separator row | Task table (see Table Format) |
+**Format** — leaf representation:
+
+| Format | Syntax | Produces |
+|--------|--------|----------|
+| Checkbox | `- [x]` or `- [ ]` (at any indent) | A checkbox node — a *task* with no children, or a *milestone* with children (see [Checkbox Tree (List Format)](#checkbox-tree-list-format)). |
+| Table | `\| ... \|` with a separator row | A flat set of leaf tasks, one per row (see [Table Format](#table-format)). |
+
+**Structure** — how items are grouped beneath a parent:
+
+| Structure | Syntax | Produces |
+|-----------|--------|----------|
+| Indentation | 2-space nesting under a checkbox | The parent checkbox becomes a milestone. |
+| Subsection heading | `### title` (any level deeper than the section) | A *group node* (no checkbox) owning the items beneath it (see [Group Nodes](#group-nodes)). |
+| Plain bullet with children | `- text` (no checkbox) + indented items | A group node; **ignored** without children (stays a context note). |
+| Cross-document reference | `[[target]]` or `[text](target)`, standalone or inside a checkbox/bullet | A reference node, resolved into a subtree of the target doc in Pass 2 (see [Cross-Document References](#cross-document-references)). |
 
 **Everything else is ignored** — including paragraphs, images, code blocks,
 and blank lines. Headings at the **same or higher level** than the section
@@ -158,24 +168,27 @@ ignored_line     ::= any line not matching node
 
 #### Progress Calculation
 
-All levels use **leaf ratio** — the ratio of done leaf tasks to total
-leaf tasks within the scope. A "leaf" is a node with no children **and**
-a checkbox state; **group leaves** (empty subsections, broken references,
-cycle markers) do **not** count toward total or done:
+All levels use **leaf ratio** — the ratio of done leaves to total leaves
+within the scope. A node counts as a leaf when it has **no children**, **a
+checkbox state**, and is **not a dead reference**. A *dead reference* is
+one that resolved to `Broken` or `Cycle` — it carries no completable work,
+so it never counts, **regardless of whether the user wrote a checkbox on
+the reference line**: `- [ ] [[missing]]` is invisible to progress, just
+like a standalone broken `[[missing]]`. Empty group nodes (e.g. an
+isolated `###` heading) likewise do not count:
 
 ```
-task (no children):          progress = 1 if [x], else 0
-milestone (has children):    progress = count(done checkbox leaves in subtree)
-                                       / count(all checkbox leaves in subtree)
-group node (has children):   same formula as milestone
-group leaf (no children):    does not count — invisible to progress
-goal:                        progress = count(done checkbox leaves) / count(all checkbox leaves)
+task (checkbox, no children):     progress = 1 if [x], else 0
+milestone (checkbox, children):   count(done leaves in subtree) / count(all leaves in subtree)
+group node (children):            same formula as milestone
+dead reference / empty heading:   does not count — invisible to progress
+goal:                             count(done leaves) / count(all leaves)
 ```
 
-**Zero checkbox leaves:** if a scope contains no checkbox leaves (an empty
-section, only milestones with no tasks beneath them, or only group nodes),
-progress is `0%` and no division is performed. This avoids division by
-zero; the scope reports status `planned` (see Derived Fields).
+**Zero leaves:** if a scope contains no leaves (an empty section, only
+milestones with no tasks beneath them, only group nodes, or only dead
+references), progress is `0%` and no division is performed. This avoids
+division by zero; the scope reports status `planned` (see Derived Fields).
 
 A milestone's own checkbox state is independent of its children — the
 user controls it manually. The TUI shows both the checkbox state and
@@ -491,8 +504,8 @@ ML Learning Track
 | Field | Derivation | Example |
 |-------|-----------|---------|
 | Title | First `#` H1 in the file. Fallback: filename without extension. | "Complete CS146s-2025" |
-| Progress | `count(done checkbox leaves) / count(all checkbox leaves) * 100`; `0%` when there are no checkbox leaves. Group leaves do not count. | 40% |
-| Status | `completed` if progress = 100%. `active` if 0 < progress < 100%. `planned` if progress = 0% (including goals with no checkbox leaves). | active |
+| Progress | `count(done leaves) / count(all leaves) * 100`; `0%` when there are no leaves. Group leaves and dead references (`Broken`/`Cycle`) do not count. | 40% |
+| Status | `completed` if progress = 100%. `active` if 0 < progress < 100%. `planned` if progress = 0% (including goals with no leaves). | active |
 
 No manual metadata fields are required. Everything is auto-derived.
 
