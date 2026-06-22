@@ -232,6 +232,20 @@ fn push_item(
         return;
     }
 
+    // Table warnings (malformed/skipped tables) render as a non-foldable
+    // `⚠` marker leaf, mirroring the broken-reference glyph below.
+    if let Some(warning) = &item.warning {
+        rows.push(GoalRow {
+            kind: GoalRowKind::Task {
+                key: key.to_string(),
+                parent_key: parent_key.to_string(),
+            },
+            text: format!("{indent}⚠ {warning}"),
+            style,
+        });
+        return;
+    }
+
     // Reference glyph: `→` for resolved, `⚠` for broken, nothing for
     // non-references. Pending should not occur after Pass 2 resolution.
     let (ref_glyph, ref_suffix) = match &item.reference {
