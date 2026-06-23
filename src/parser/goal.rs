@@ -665,7 +665,7 @@ fn match_reference(text: &str) -> Option<(String, String)> {
     let text = text.trim();
     if let Some(caps) = wikilink_re().captures(text) {
         let target = caps[1].trim();
-        if target.is_empty() {
+        if target.is_empty() || is_url_target(target) {
             return None;
         }
         return Some((target.to_string(), String::new()));
@@ -673,12 +673,19 @@ fn match_reference(text: &str) -> Option<(String, String)> {
     if let Some(caps) = mdlink_re().captures(text) {
         let display = caps[1].trim();
         let target = caps[2].trim();
-        if target.is_empty() {
+        if target.is_empty() || is_url_target(target) {
             return None;
         }
         return Some((target.to_string(), display.to_string()));
     }
     None
+}
+
+/// Whether a reference target is an external URL (e.g. `https://…`),
+/// not a repo file. Such targets are markdown links to the outside world
+/// and must not be treated as cross-document references.
+fn is_url_target(target: &str) -> bool {
+    target.contains("://")
 }
 
 /// First H1 (`#`) heading text in the file, if any.
@@ -862,6 +869,24 @@ mod tests {
         let goal = parse(md, Path::new("x.md"), &ctx()).unwrap();
         assert_eq!(goal.items.len(), 1);
         assert_eq!(goal.items[0].text, "real");
+    }
+
+    #[test]
+    fn markdown_link_with_url_target_is_not_a_reference() {
+        // An external link like [MIT 6.173](http://…) is not a cross-document
+        // reference; it stays a literal task and produces no broken-ref marker.
+        let md = "## GOAL TRACKER\n\n- [ ] [MIT 6.173](http://web.mit.edu/6.173/)\n";
+        let goal = parse(md, Path::new("x.md"), &ctx()).unwrap();
+        assert_eq!(goal.items.len(), 1);
+        assert!(
+            goal.items[0].reference.is_none(),
+            "a URL target is not a doc reference"
+        );
+        assert!(
+            goal.items[0].warning.is_none(),
+            "no broken-ref marker for a URL link"
+        );
+        assert!(goal.items[0].text.contains("MIT 6.173"));
     }
 
     #[test]
