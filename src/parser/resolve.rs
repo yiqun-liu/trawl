@@ -26,7 +26,7 @@ use crate::model::{BrokenReason, Goal, GoalItem, Reference};
 /// the scanner, regardless of whether they contained a goal tracker. It is
 /// used to distinguish `NoGoalTracker` (file was scanned but has no tracker)
 /// from `NotFound` (file is not in the scan set at all).
-pub fn resolve_references(goals: &mut [Goal], scanned_files: &HashSet<PathBuf>) {
+pub fn resolve_references(goals: &mut Vec<Goal>, scanned_files: &HashSet<PathBuf>) {
     // Snapshot each goal's title and items into an owned map keyed by
     // normalized source_file. The resolver needs to read items from goals
     // *other than* the one it's currently mutating — a snapshot avoids the
@@ -51,6 +51,56 @@ pub fn resolve_references(goals: &mut [Goal], scanned_files: &HashSet<PathBuf>) 
             &title_and_items,
             &scanned_keys,
         );
+    }
+
+    // A goal that another goal successfully references (Reference::Resolved)
+    // has already been deep-cloned into that parent's tree. It is therefore a
+    // subtree of its parent, not an independent top-level goal — drop it from
+    // the top-level list so each tracker appears exactly once.
+    //
+    // Removal follows reference reachability from roots (goals that no one
+    // references): a goal is dropped iff it is reachable from a root via one
+    // or more resolved references. This keeps the common tree case correct
+    // (every child reachable from a root) while leaving mutually-cyclic goals
+    // top-level — they have no root, so dropping them would make them vanish.
+    let mut edges: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    for g in goals.iter() {
+        let mut targets = HashSet::new();
+        collect_resolved_targets(&g.items, &mut targets);
+        let src = normalize_key(&g.source_file);
+        for t in targets {
+            edges.entry(src.clone()).or_default().push(t);
+        }
+    }
+    let targeted: HashSet<PathBuf> = edges.values().flatten().cloned().collect();
+    let roots: HashSet<PathBuf> = goals
+        .iter()
+        .map(|g| normalize_key(&g.source_file))
+        .filter(|k| !targeted.contains(k))
+        .collect();
+    // BFS from roots; every node reached (other than the roots themselves) is
+    // a subtree and is dropped.
+    let mut reachable: HashSet<PathBuf> = HashSet::new();
+    let mut stack: Vec<PathBuf> = roots.iter().cloned().collect();
+    while let Some(node) = stack.pop() {
+        if let Some(nexts) = edges.get(&node) {
+            for t in nexts {
+                if reachable.insert(t.clone()) {
+                    stack.push(t.clone());
+                }
+            }
+        }
+    }
+    goals.retain(|g| !reachable.contains(&normalize_key(&g.source_file)));
+}
+
+/// Recursively collect every [`Reference::Resolved`] target path in `items`.
+fn collect_resolved_targets(items: &[GoalItem], out: &mut HashSet<PathBuf>) {
+    for item in items {
+        if let Some(Reference::Resolved { target_path, .. }) = &item.reference {
+            out.insert(target_path.clone());
+        }
+        collect_resolved_targets(&item.children, out);
     }
 }
 
@@ -355,14 +405,35 @@ mod tests {
         let mut goals = vec![a, b, c];
         resolve_references(&mut goals, &empty_scanned());
 
+        // B is a subtree of both A and C, so it is dropped from the top-level
+        // list (each tracker appears once). Only the two roots remain.
+        let titles: Vec<&str> = goals.iter().map(|g| g.title.as_str()).collect();
+        assert_eq!(titles, vec!["A", "C"], "B is a subtree, not top-level");
+
+        let a_goal = goals.iter().find(|g| g.title == "A").unwrap();
+        let c_goal = goals.iter().find(|g| g.title == "C").unwrap();
         // Both A and C reference B and have one cloned child.
+        assert_eq!(a_goal.items[0].children.len(), 1);
+        assert_eq!(c_goal.items[0].children.len(), 1);
+        // They are independent clones (both point back at b.md's content).
+        assert_eq!(a_goal.items[0].children[0].span.path, PathBuf::from("b.md"));
+        assert_eq!(c_goal.items[0].children[0].span.path, PathBuf::from("b.md"));
+    }
+
+    #[test]
+    fn referenced_goal_becomes_subtree_not_top_level() {
+        // Parent P references child C. C is deep-cloned into P and dropped
+        // from the top-level list; P stays as the single root.
+        let c = goal("C", "c.md", vec![checkbox_leaf("c-task", false, "c.md", 1)]);
+        let p = goal("P", "p.md", vec![pending_ref("c", "", "p.md", 1)]);
+        let mut goals = vec![p, c];
+        resolve_references(&mut goals, &empty_scanned());
+
+        let titles: Vec<&str> = goals.iter().map(|g| g.title.as_str()).collect();
+        assert_eq!(titles, vec!["P"], "only the root remains top-level");
+        // C's content survives inside P's subtree.
         assert_eq!(goals[0].items[0].children.len(), 1);
-        assert_eq!(goals[2].items[0].children.len(), 1);
-        // They are independent (different paths under the parent).
-        assert_eq!(
-            goals[0].items[0].children[0].span.path,
-            PathBuf::from("b.md")
-        );
+        assert_eq!(goals[0].items[0].children[0].text, "c-task");
     }
 
     #[test]
