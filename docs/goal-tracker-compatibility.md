@@ -326,9 +326,14 @@ before assuming a syntax problem.
 | **Broken: no goal tracker** | Target was scanned but has no tracker | `⚠ (no goal tracker: target)` leaf — no subtree. |
 | **Cycle** | Target is already on the expansion chain (A → B → A) | `↻ (cycle: a → b → a)` leaf — expansion stops. |
 
-The dashboard still shows every tracker top-level — references add
-nested views; they never replace the source. A goal may be referenced
-from multiple parents (a diamond); each gets its own deep-cloned copy.
+A referenced tracker becomes a **subtree** of its parent and no longer
+appears as a separate top-level goal — each tracker shows exactly once in
+the dashboard (nested under the goal that references it). A goal may be
+referenced from multiple parents (a diamond); each parent gets its own
+deep-cloned copy, and the referenced tracker is absent from the top-level
+list. Mutually-cyclic goals (A → B → A, with no outside root) are an
+exception: having no root to hang from, they remain top-level and the
+cycle is shown as a `↻` marker.
 
 ---
 

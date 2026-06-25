@@ -114,7 +114,7 @@ across multiple planning docs) aggregate into a single tree.
 | Recursion | Linear chains of any length; cycles detected and rendered as markers |
 | Broken refs | Missing file → `⚠ not found`; scanned file with no tracker → `⚠ no goal tracker` |
 | Diamond refs | Each appearance gets its own deep-cloned copy |
-| Top-level display | Every tracker is still shown top-level in the dashboard — references add nested views, never replace |
+| Top-level display | A referenced tracker becomes a subtree of its parent and is dropped from the top-level list — each tracker appears once (nested). Mutually-cyclic goals (no outside root) stay top-level |
 
 > Full syntax specification: see [syntax.md](syntax.md) → Cross-Document
 > References

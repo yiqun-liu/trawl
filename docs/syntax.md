@@ -460,9 +460,10 @@ converts each `Pending` reference into one of:
 | **Cycle** | Target is already on the active expansion chain | Rendered with `↻ (cycle: a → b → a)`; expansion stops. |
 
 A goal may be referenced from multiple parents (a diamond); each
-expansion gets its own deep-cloned copy. Every goal tracker is also
-shown top-level in the dashboard — references add additional nested
-views, they never replace the source.
+expansion gets its own deep-cloned copy. A referenced tracker becomes a
+subtree of its parent and is dropped from the top-level dashboard list —
+each tracker appears exactly once (nested). Mutually-cyclic goals (no
+outside root) remain top-level, with the cycle shown as a `↻` marker.
 
 #### Example
 
