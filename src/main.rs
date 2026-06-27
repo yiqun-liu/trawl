@@ -19,7 +19,10 @@ use trawl::{
 #[command(
     name = "trawl",
     version,
-    about = "TODO Repository Annotation Work List"
+    about = "TODO Repository Annotation Work List",
+    after_long_help = "View state (expanded nodes and the active view) is persisted per repository \
+under the XDG state directory (~/.local/state/trawl/ on Linux) so the dashboard reopens as you \
+left it. Remove that directory to clear it."
 )]
 struct Cli {
     /// Repository path to scan.

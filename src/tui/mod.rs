@@ -40,7 +40,7 @@ use inline_view::{auto_expand_keys, build_tree, flatten_inline, InlineRow, TreeN
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum View {
     Goals,
     Inline,
@@ -75,6 +75,9 @@ impl SortMode {
 
 /// Run the TUI over a scan result. Restores the terminal on exit or panic.
 pub fn run(result: ScanResult, root: PathBuf, headers: HashMap<String, Vec<String>>) -> Result<()> {
+    // Restore the last dashboard layout (expanded nodes + active view) for this
+    // repository, if any was persisted. Best-effort; missing/invalid is ignored.
+    let snapshot = crate::state::load(&root);
     let mut app = App::new(
         result.goals,
         result.inline_tasks,
@@ -83,12 +86,39 @@ pub fn run(result: ScanResult, root: PathBuf, headers: HashMap<String, Vec<Strin
         result.file_contents,
         2, // context_lines (matches display default)
     );
+    app.restore_state(snapshot);
 
     let mut terminal = setup_terminal()?;
     // If the main loop errors, still restore the terminal before returning.
     let outcome = run_loop(&mut terminal, &mut app);
     restore_terminal(&mut terminal)?;
+
+    // Persist the dashboard layout so the next run reopens as the user left it.
+    // Best-effort; failures are logged inside `save` and otherwise ignored.
+    persist_state(&app);
+
     outcome
+}
+
+/// Serialize the current expand sets and active view to the per-repository
+/// state file.
+fn persist_state(app: &App) {
+    let mut goals_expanded: Vec<String> = app.goal_expanded.iter().cloned().collect();
+    goals_expanded.sort();
+    let mut inline_expanded: Vec<String> = app.expanded_inline.iter().cloned().collect();
+    inline_expanded.sort();
+    let view = match app.view {
+        View::Goals => "goals",
+        View::Inline => "inline",
+    };
+    crate::state::save(
+        &app.root,
+        &crate::state::ViewSnapshot {
+            view: Some(view.to_string()),
+            goals_expanded,
+            inline_expanded,
+        },
+    );
 }
 
 fn setup_terminal() -> Result<Tui> {
@@ -378,6 +408,11 @@ fn help_text(view: View) -> Vec<Line<'static>> {
     lines.push(Line::from(""));
     lines.push(Line::from("  ?            toggle this help"));
     lines.push(Line::from("  q / Ctrl+C   quit"));
+    lines.push(Line::from(""));
+    lines.push(Line::from(format!(
+        "view state (expansion) is remembered under:\n  {}",
+        crate::state::state_dir_display()
+    )));
     lines
 }
 
@@ -506,6 +541,55 @@ impl App {
             pending_edit: None,
             viewport_height: 0,
         }
+    }
+
+    /// Seed fold state and the active view from a persisted [`ViewSnapshot`],
+    /// dropping any key that no longer exists in the freshly-scanned tree, then
+    /// rebuilding rows. Call once right after construction. A default (empty)
+    /// snapshot leaves the freshly-constructed state untouched.
+    fn restore_state(&mut self, snapshot: crate::state::ViewSnapshot) {
+        // Goals: only headers and milestones are foldable, which is exactly what
+        // `all_node_keys` enumerates. Keep a saved key only while still valid.
+        let valid_goal: HashSet<String> = goals::all_node_keys(&self.goals).into_iter().collect();
+        self.goal_expanded = snapshot
+            .goals_expanded
+            .into_iter()
+            .filter(|k| valid_goal.contains(k))
+            .collect();
+
+        // Inline: the auto-expanded high-priority dirs stay; persisted keys are
+        // layered on top, kept only if still valid. Task-context keys
+        // (`file::line`) are reconstructed from the tasks so line-drift cannot
+        // resurrect a stale context expansion on the wrong line.
+        let mut valid_inline: HashSet<String> = inline_view::all_node_keys(&self.inline_root)
+            .into_iter()
+            .collect();
+        for t in &self.inline_tasks {
+            let rel = t.span.path.to_string_lossy().replace('\\', "/");
+            valid_inline.insert(format!("{rel}::{}", t.span.line));
+        }
+        for k in snapshot.inline_expanded {
+            if valid_inline.contains(&k) {
+                self.expanded_inline.insert(k);
+            }
+        }
+
+        self.view = match snapshot.view.as_deref() {
+            Some("inline") => View::Inline,
+            _ => View::Goals,
+        };
+
+        // Rebuild rows from the newly-seeded expand sets.
+        self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded, self.show_blame);
+        self.inline_rows = flatten_inline(
+            &self.inline_root,
+            &self.inline_displayed,
+            &self.expanded_inline,
+            self.show_blame,
+            &self.file_contents,
+            self.context_lines,
+        );
+        self.refresh_search();
     }
 
     /// `f`: begin (or edit) the filter query.
@@ -1980,6 +2064,59 @@ mod tests {
         app.collapse_selected(); // src/a already folded -> folds src
         assert!(!app.expanded_inline.contains("src"));
         assert_eq!(inline_row_id(&app.inline_rows[app.inline_selected]), "src");
+    }
+
+    // ---- persisted view state ----
+
+    #[test]
+    fn restore_state_seeds_goals_and_drops_stale_keys() {
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
+        // "g0" header and "g0/0" milestone are real; "g9" is not.
+        let snap = crate::state::ViewSnapshot {
+            view: Some("inline".into()),
+            goals_expanded: vec!["g0".into(), "g0/0".into(), "g9".into()],
+            inline_expanded: vec![],
+        };
+        app.restore_state(snap);
+        assert!(app.goal_expanded.contains("g0"));
+        assert!(app.goal_expanded.contains("g0/0"));
+        assert!(!app.goal_expanded.contains("g9"), "stale key dropped");
+        assert_eq!(app.view, View::Inline, "active view restored");
+        assert!(app.goal_rows.len() > 1, "rows rebuilt to reflect expansion");
+    }
+
+    #[test]
+    fn restore_state_layers_saved_inline_keys_and_drops_stale() {
+        let mut app = App::new(
+            vec![],
+            vec![itask("src/a.rs", 1), itask("docs/b.md", 2)],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
+        let snap = crate::state::ViewSnapshot {
+            view: Some("goals".into()),
+            goals_expanded: vec![],
+            inline_expanded: vec!["docs/b.md".into(), "stale/x.rs".into()],
+        };
+        app.restore_state(snap);
+        assert!(
+            app.expanded_inline.contains("docs/b.md"),
+            "saved key restored"
+        );
+        assert!(
+            !app.expanded_inline.contains("stale/x.rs"),
+            "stale inline key dropped"
+        );
+        assert_eq!(app.view, View::Goals);
     }
 
     // ---- incremental search (/) ----

@@ -10,6 +10,7 @@ pub mod metadata;
 pub mod model;
 pub mod parser;
 pub mod scanner;
+pub mod state;
 pub mod tui;
 
 use std::collections::HashMap;
