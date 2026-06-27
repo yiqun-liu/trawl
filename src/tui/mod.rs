@@ -349,7 +349,7 @@ fn help_text(view: View) -> Vec<Line<'static>> {
         Line::from("  j / k        move down / up"),
         Line::from("  PgDn / PgUp  page down / up"),
         Line::from("  Home / End   first / last row"),
-        Line::from("  l / h        expand / collapse"),
+        Line::from("  l / h        expand / collapse (h folds up when closed)"),
         Line::from("  Enter        toggle  (on a leaf, toggles its parent)"),
         Line::from("  Space        toggle checkbox  (goals view; writes back)"),
         Line::from("  g            toggle git blame (inline view)"),
@@ -932,17 +932,50 @@ impl App {
         }
     }
 
+    /// `h` / Backspace: collapse the selected node. If it is already collapsed,
+    /// collapse its nearest expanded ancestor instead, so pressing `h`
+    /// repeatedly folds the tree level by level from the bottom up. The cursor
+    /// re-anchors onto the node that got folded (its descendants are hidden).
     fn collapse_selected(&mut self) {
         let Some(key) = self.current_key() else {
             return;
         };
+        let target = if self.is_expanded(&key) {
+            Some(key)
+        } else {
+            self.nearest_expanded_ancestor(&key)
+        };
+        let Some(target) = target else {
+            return;
+        };
         let was_open = match self.view {
-            View::Goals => self.goal_expanded.remove(&key),
-            View::Inline => self.expanded_inline.remove(&key),
+            View::Goals => self.goal_expanded.remove(&target),
+            View::Inline => self.expanded_inline.remove(&target),
         };
         if was_open {
             self.rebuild_active();
         }
+    }
+
+    /// Whether `key` is currently expanded in the active view.
+    fn is_expanded(&self, key: &str) -> bool {
+        match self.view {
+            View::Goals => self.goal_expanded.contains(key),
+            View::Inline => self.expanded_inline.contains(key),
+        }
+    }
+
+    /// The nearest ancestor of `key` that is currently expanded in the active
+    /// view, walking up via [`ancestor_id`]. `None` when no ancestor is open.
+    fn nearest_expanded_ancestor(&self, key: &str) -> Option<String> {
+        let mut cur = ancestor_id(key);
+        while let Some(parent) = cur {
+            if self.is_expanded(&parent) {
+                return Some(parent);
+            }
+            cur = ancestor_id(&parent);
+        }
+        None
     }
 
     /// `Space` (goals view): toggle the selected item's completion in the
@@ -1864,6 +1897,89 @@ mod tests {
         app.inline_selected = 3;
         app.jump_home();
         assert_eq!(inline_row_id(&app.inline_rows[app.inline_selected]), "a.rs");
+    }
+
+    // ---- collapse walks up the tree ----
+
+    #[test]
+    fn collapse_on_collapsed_node_folds_nearest_expanded_ancestor() {
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
+        // g0 expanded; its milestone m1 (g0/0) is visible but folded.
+        app.goal_expanded.insert("g0".into());
+        select_goal(&mut app, "g0/0");
+        app.collapse_selected(); // h on an already-collapsed milestone
+        assert!(!app.goal_expanded.contains("g0"), "ancestor g0 folded");
+        assert_eq!(selected_goal_id(&app), "g0", "cursor reanchored to g0");
+    }
+
+    #[test]
+    fn collapse_repeatedly_walks_to_the_top() {
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
+        app.goal_expanded.insert("g0".into());
+        app.goal_expanded.insert("g0/0".into());
+        select_goal(&mut app, "g0/0/0"); // deep leaf
+        app.collapse_selected(); // folds m1 (g0/0); cursor -> g0/0
+        assert_eq!(selected_goal_id(&app), "g0/0");
+        assert!(!app.goal_expanded.contains("g0/0"));
+        app.collapse_selected(); // g0/0 already folded -> folds g0
+        assert_eq!(selected_goal_id(&app), "g0");
+        assert!(!app.goal_expanded.contains("g0"));
+        app.collapse_selected(); // g0 already folded, no ancestor -> no-op
+        assert_eq!(selected_goal_id(&app), "g0");
+    }
+
+    #[test]
+    fn collapse_top_level_collapsed_node_is_noop() {
+        let mut app = App::new(
+            sample_goals(),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            2,
+        );
+        select_goal(&mut app, "g0"); // nothing expanded, header already folded
+        app.collapse_selected();
+        assert!(app.goal_expanded.is_empty());
+        assert_eq!(selected_goal_id(&app), "g0");
+    }
+
+    #[test]
+    fn collapse_inline_dir_walks_up_to_parent() {
+        let tasks = vec![itask("src/a/b.rs", 1), itask("src/a/c.rs", 2)];
+        let mut app = App::new(
+            vec![],
+            tasks,
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            0,
+        );
+        app.view = View::Inline;
+        app.expanded_inline.insert("src".into()); // shows src/a/ folded
+        app.rebuild_inline_rows();
+        app.inline_selected = app
+            .inline_rows
+            .iter()
+            .position(|r| inline_row_id(r) == "src/a")
+            .unwrap();
+        app.collapse_selected(); // src/a already folded -> folds src
+        assert!(!app.expanded_inline.contains("src"));
+        assert_eq!(inline_row_id(&app.inline_rows[app.inline_selected]), "src");
     }
 
     // ---- incremental search (/) ----
