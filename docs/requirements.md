@@ -29,7 +29,13 @@ code repositories, configuration repos, or any git-tracked project.
 ### Design Principles
 
 - **Scan, don't manage**: TRAWL discovers items from file contents. It does
-  not store state in a database — the files *are* the database.
+  not store *derived* state in a database — the files *are* the database. The
+  sole exception is ephemeral UI state (expanded nodes and the active view),
+  which is persisted per repository under the XDG state directory
+  (`~/.local/state/trawl/` on Linux) so the dashboard reopens as the user left
+  it. It is best-effort and never a source of truth: on load it is intersected
+  with the live tree, so it cannot re-expand a node that no longer exists, and
+  removing that directory clears it.
 - **Pure markdown + inline markers**: no frontmatter, no custom file format.
   Goal trackers are standard markdown sections; inline tasks are standard
   comments.

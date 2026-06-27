@@ -27,8 +27,14 @@ TRAWL is built on a few core principles. All implementation decisions should
 be consistent with these:
 
 - **Scan, don't manage**: TRAWL discovers items from file contents. It does
-  not store state in a database — the files *are* the database. Never
-  introduce persistent state files, caches, or databases.
+  not store *derived* state in a database — the files *are* the database.
+  Never introduce persistent caches or databases that mirror scan results
+  (parsed tasks, goals, or blame data). The sole exception is *ephemeral UI
+  state* — which nodes are expanded and which view is active — persisted per
+  repository under the XDG state directory so the dashboard reopens as the
+  user left it. UI state is best-effort, never a source of truth, and is
+  intersected with the live tree on load so it can never re-expand a node
+  that no longer exists.
 - **Pure markdown + inline markers**: no frontmatter, no custom file format.
   Goal trackers are standard markdown sections; inline tasks are standard
   comments. Do not invent new file formats or require users to add metadata
