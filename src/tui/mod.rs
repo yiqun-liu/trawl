@@ -213,6 +213,10 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Tab => app.toggle_view(),
         KeyCode::Char('j') | KeyCode::Down => app.move_cursor(1),
         KeyCode::Char('k') | KeyCode::Up => app.move_cursor(-1),
+        KeyCode::PageDown => app.move_cursor_page(1),
+        KeyCode::PageUp => app.move_cursor_page(-1),
+        KeyCode::Home => app.jump_home(),
+        KeyCode::End => app.jump_end(),
         KeyCode::Char('l') => app.expand_selected(),
         KeyCode::Enter => app.toggle_selected(),
         KeyCode::Char('h') | KeyCode::Backspace => app.collapse_selected(),
@@ -240,12 +244,16 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
     }
 }
 
-fn draw(f: &mut Frame, app: &App) {
+fn draw(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(f.area());
     let (main, footer) = (chunks[0], chunks[1]);
+
+    // Cache the visible content height so PageUp/PageDown move by a full page.
+    // The List draws a top+bottom border, so two rows are non-content.
+    app.viewport_height = main.height.saturating_sub(2) as usize;
 
     match app.view {
         View::Goals => goals::draw(f, app, main),
@@ -261,13 +269,13 @@ fn draw(f: &mut Frame, app: &App) {
     } else {
         let mut base = match app.view {
             View::Goals => {
-                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  S: stats  C: done  Z: all  X: expand all  /: search  j/k  Tab  q".to_string()
+                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  S: stats  C: done  Z: all  X: expand all  /: search  j/k  PgUp/PgDn  Home/End  Tab  q".to_string()
             }
             View::Inline if app.filter.is_some() => {
-                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  S: stats  Z: all  X: expand  /: search  Tab: Goals  q: quit", app.filter_query)
+                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  S: stats  Z: all  X: expand  /: search  Tab: Goals  PgUp/PgDn  Home/End  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  /: search  s: sort  g: blame  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  n/N  j/k  Tab: Goals  q: quit".to_string()
+                "f: filter  /: search  s: sort  g: blame  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  n/N  j/k  PgUp/PgDn  Home/End  Tab: Goals  q: quit".to_string()
             }
         };
         if !app.search_query.is_empty() {
@@ -339,6 +347,8 @@ fn help_text(view: View) -> Vec<Line<'static>> {
     let mut lines = vec![
         Line::from("Navigation"),
         Line::from("  j / k        move down / up"),
+        Line::from("  PgDn / PgUp  page down / up"),
+        Line::from("  Home / End   first / last row"),
         Line::from("  l / h        expand / collapse"),
         Line::from("  Enter        toggle  (on a leaf, toggles its parent)"),
         Line::from("  Space        toggle checkbox  (goals view; writes back)"),
@@ -425,6 +435,9 @@ struct App {
     show_stats: bool,
     show_blame: bool,
     pending_edit: Option<(PathBuf, usize)>,
+    /// Visible content rows in the active view's list (set during draw), used
+    /// to size page-up / page-down jumps.
+    viewport_height: usize,
 }
 
 /// In-flight table-cell edit: which goal item, which source line, which column.
@@ -491,6 +504,7 @@ impl App {
             show_stats: false,
             show_blame: false,
             pending_edit: None,
+            viewport_height: 0,
         }
     }
 
@@ -833,30 +847,76 @@ impl App {
             View::Goals => {
                 let len = self.goal_rows.len();
                 if len != 0 {
-                    let next = (self.goal_selected as i32 + delta).clamp(0, (len - 1) as i32);
-                    self.goal_selected = next as usize;
+                    self.goal_selected =
+                        (self.goal_selected as i32 + delta).clamp(0, (len - 1) as i32) as usize;
                 }
             }
             View::Inline => {
-                let len = self.inline_rows.len();
-                if len == 0 {
+                if self.inline_rows.is_empty() {
                     return;
                 }
-                let mut next = (self.inline_selected as i32 + delta).clamp(0, (len - 1) as i32);
-                // Skip Context (display-only) rows.
-                while let Some(row) = self.inline_rows.get(next as usize) {
-                    if matches!(row.kind, inline_view::InlineRowKind::Context) {
-                        next += delta;
-                        if next < 0 || next as usize >= len {
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                self.inline_selected = next.clamp(0, (len - 1) as i32) as usize;
+                let target = self.inline_selected as i32 + delta;
+                self.inline_selected = self.resolve_inline_select(target, delta.signum());
             }
         }
+    }
+
+    /// Move the cursor by one viewport page in `dir` (1 down, -1 up), leaving a
+    /// one-row overlap so context is preserved across the jump.
+    fn move_cursor_page(&mut self, dir: i32) {
+        let page = match self.viewport_height {
+            0 => 10, // viewport not measured yet
+            1 => 1,
+            _ => self.viewport_height - 1,
+        };
+        self.move_cursor(dir * page as i32);
+    }
+
+    /// Home: jump to the first selectable row.
+    fn jump_home(&mut self) {
+        match self.view {
+            View::Goals => self.goal_selected = 0,
+            View::Inline => self.inline_selected = self.resolve_inline_select(0, 1),
+        }
+    }
+
+    /// End: jump to the last selectable row.
+    fn jump_end(&mut self) {
+        match self.view {
+            View::Goals => {
+                let len = self.goal_rows.len();
+                self.goal_selected = if len == 0 { 0 } else { len - 1 };
+            }
+            View::Inline => {
+                let len = self.inline_rows.len();
+                let last = if len == 0 { 0 } else { len as i32 - 1 };
+                self.inline_selected = self.resolve_inline_select(last, -1);
+            }
+        }
+    }
+
+    /// Clamp `target` into range and step past display-only `Context` rows (one
+    /// row at a time in `dir`) so the cursor always lands on a selectable row.
+    fn resolve_inline_select(&self, target: i32, dir: i32) -> usize {
+        let len = self.inline_rows.len();
+        if len == 0 {
+            return 0;
+        }
+        let mut idx = target.clamp(0, (len - 1) as i32);
+        while let Some(row) = self.inline_rows.get(idx as usize) {
+            if !matches!(row.kind, inline_view::InlineRowKind::Context) {
+                break;
+            }
+            if dir == 0 {
+                break;
+            }
+            let nxt = idx + dir;
+            if nxt < 0 || nxt as usize >= len {
+                break;
+            }
+            idx = nxt;
+        }
+        idx.clamp(0, (len - 1) as i32) as usize
     }
 
     fn expand_selected(&mut self) {
@@ -1695,6 +1755,115 @@ mod tests {
         app.toggle_blame();
         assert!(!app.show_blame);
         assert!(!app.goal_rows.is_empty());
+    }
+
+    // ---- page / home / end navigation ----
+
+    fn many_leaf_goal(n: usize) -> Vec<Goal> {
+        let items: Vec<GoalItem> = (0..n).map(|i| leaf(&format!("t{i}"), false)).collect();
+        vec![goal("G", items)]
+    }
+
+    #[test]
+    fn page_down_advances_by_viewport_minus_overlap() {
+        let mut app = App::new(
+            many_leaf_goal(20),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            0,
+        );
+        app.goal_expanded.insert("g0".into());
+        app.goal_rows = flatten_goals(&app.goals, &app.goal_expanded, false);
+        assert_eq!(app.goal_rows.len(), 21); // header + 20 leaves
+
+        app.viewport_height = 6; // page step = 5 (one-row overlap)
+        app.goal_selected = 0;
+        app.move_cursor_page(1);
+        assert_eq!(app.goal_selected, 5);
+        app.move_cursor_page(1);
+        assert_eq!(app.goal_selected, 10);
+        // page down past the end clamps to the last row
+        app.goal_selected = 18;
+        app.move_cursor_page(1);
+        assert_eq!(app.goal_selected, 20);
+        // page up before the start clamps to the first row
+        app.goal_selected = 2;
+        app.move_cursor_page(-1);
+        assert_eq!(app.goal_selected, 0);
+    }
+
+    #[test]
+    fn page_down_without_measured_viewport_uses_default() {
+        let mut app = App::new(
+            many_leaf_goal(40),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            0,
+        );
+        app.goal_expanded.insert("g0".into());
+        app.goal_rows = flatten_goals(&app.goals, &app.goal_expanded, false);
+        app.viewport_height = 0; // not drawn yet -> default page of 10
+        app.goal_selected = 0;
+        app.move_cursor_page(1);
+        assert_eq!(app.goal_selected, 10);
+    }
+
+    #[test]
+    fn home_and_end_jump_to_ends() {
+        let mut app = App::new(
+            many_leaf_goal(10),
+            vec![],
+            PathBuf::from("."),
+            HashMap::new(),
+            HashMap::new(),
+            0,
+        );
+        app.goal_expanded.insert("g0".into());
+        app.goal_rows = flatten_goals(&app.goals, &app.goal_expanded, false);
+        // 11 rows: header (0) + leaves (1..=10)
+        app.goal_selected = 5;
+        app.jump_home();
+        assert_eq!(app.goal_selected, 0);
+        app.goal_selected = 5;
+        app.jump_end();
+        assert_eq!(app.goal_selected, 10);
+    }
+
+    #[test]
+    fn end_skips_trailing_inline_context_rows() {
+        let tasks = vec![itask("a.rs", 1), itask("a.rs", 5), itask("a.rs", 9)];
+        let mut contents = HashMap::new();
+        contents.insert(
+            PathBuf::from("a.rs"),
+            "0\n1\n2\n3\n4\n5\n6\n7\n8\n9".to_string(),
+        );
+        let mut app = App::new(
+            vec![],
+            tasks,
+            PathBuf::from("."),
+            HashMap::new(),
+            contents,
+            1, // context_lines
+        );
+        app.view = View::Inline;
+        app.expanded_inline.insert("a.rs".into());
+        app.expanded_inline.insert("a.rs::9".into()); // expand the last task
+        app.rebuild_inline_rows();
+        // rows: a.rs(0) L1(1) L5(2) L9(3) ctx L8(4) ctx L9(5) ctx L10(6)
+        assert_eq!(app.inline_rows.len(), 7);
+        app.jump_end();
+        // trailing Context rows skipped; cursor lands on task L9
+        assert_eq!(
+            inline_row_id(&app.inline_rows[app.inline_selected]),
+            "a.rs::9"
+        );
+        app.inline_selected = 3;
+        app.jump_home();
+        assert_eq!(inline_row_id(&app.inline_rows[app.inline_selected]), "a.rs");
     }
 
     // ---- incremental search (/) ----
