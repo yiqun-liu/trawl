@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Stdout};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::{
@@ -144,6 +144,14 @@ fn run_loop(terminal: &mut Tui, app: &mut App) -> Result<()> {
     }));
 
     while !app.quit {
+        // Expire a half-entered chord prefix (e.g. a lone `g`) whose timeout
+        // elapsed, so the footer hint clears and a stale prefix never swallows
+        // an unrelated keypress. Checked before draw so the next frame reflects
+        // the cleared state.
+        if app.prefix_deadline.is_some_and(|d| d < Instant::now()) {
+            app.pending_prefix = None;
+            app.prefix_deadline = None;
+        }
         terminal.draw(|f| draw(f, app))?;
         if !event::poll(Duration::from_millis(250))? {
             continue;
@@ -238,6 +246,18 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         return;
     }
 
+    // Resolve a pending chord prefix (e.g. the first `g` of `gg`) before
+    // normal dispatch. A completing key runs the chord; any other key abandons
+    // the chord and is swallowed (vim-style), so a stray `g`+`j` moves nothing.
+    if app.pending_prefix == Some('g') {
+        app.pending_prefix = None;
+        app.prefix_deadline = None;
+        if key.code == KeyCode::Char('g') {
+            app.jump_home();
+        }
+        return;
+    }
+
     match key.code {
         KeyCode::Char('q') | KeyCode::Char('Q') => app.quit = true,
         KeyCode::Tab => app.toggle_view(),
@@ -247,6 +267,7 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::PageUp => app.move_cursor_page(-1),
         KeyCode::Home => app.jump_home(),
         KeyCode::End => app.jump_end(),
+        KeyCode::Char('G') => app.jump_end(),
         KeyCode::Char('l') => app.expand_selected(),
         KeyCode::Enter => app.toggle_selected(),
         KeyCode::Char('h') | KeyCode::Backspace => app.collapse_selected(),
@@ -259,7 +280,13 @@ fn handle_key(app: &mut App, key: event::KeyEvent) {
         KeyCode::Char('n') => app.next_match(),
         KeyCode::Char('N') => app.prev_match(),
         KeyCode::Char('s') => app.cycle_sort(),
-        KeyCode::Char('g') => app.toggle_blame(),
+        KeyCode::Char('b') => app.toggle_blame(),
+        // Arm the `gg` (go to top) chord; the second key is resolved by the
+        // prefix guard above.
+        KeyCode::Char('g') => {
+            app.pending_prefix = Some('g');
+            app.prefix_deadline = Some(Instant::now() + Duration::from_millis(750));
+        }
         KeyCode::Esc => {
             if !app.search_query.is_empty() {
                 app.clear_search();
@@ -299,13 +326,13 @@ fn draw(f: &mut Frame, app: &mut App) {
     } else {
         let mut base = match app.view {
             View::Goals => {
-                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  S: stats  C: done  Z: all  X: expand all  /: search  j/k  PgUp/PgDn  Home/End  Tab  q".to_string()
+                "Enter: toggle  l: expand  h: collapse  Space: toggle box  e: edit  S: stats  C: done  Z: all  X: expand all  /: search  j/k  PgUp/PgDn  gg/G  Tab  q".to_string()
             }
             View::Inline if app.filter.is_some() => {
-                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  S: stats  Z: all  X: expand  /: search  Tab: Goals  PgUp/PgDn  Home/End  q: quit", app.filter_query)
+                format!("filter: \"{}\"  f: edit  Esc: clear  e: edit  s: sort  S: stats  Z: all  X: expand  /: search  Tab: Goals  PgUp/PgDn  gg/G  q: quit", app.filter_query)
             }
             View::Inline => {
-                "f: filter  /: search  s: sort  g: blame  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  n/N  j/k  PgUp/PgDn  Home/End  Tab: Goals  q: quit".to_string()
+                "f: filter  /: search  s: sort  b: blame  Enter: toggle  l/h: fold  e: edit  S: stats  Z: all  X: expand  n/N  j/k  PgUp/PgDn  gg/G  Tab: Goals  q: quit".to_string()
             }
         };
         if !app.search_query.is_empty() {
@@ -315,6 +342,11 @@ fn draw(f: &mut Frame, app: &mut App) {
                 "  | /: \"{}\" [{}/{}]",
                 app.search_query, pos, total
             ));
+        }
+        // Surface a half-entered chord (e.g. a lone `g` awaiting `g`) so the
+        // user can see why the next key is being interpreted as a chord.
+        if app.pending_prefix.is_some() {
+            base.push_str("  | g…");
         }
         base
     };
@@ -378,11 +410,12 @@ fn help_text(view: View) -> Vec<Line<'static>> {
         Line::from("Navigation"),
         Line::from("  j / k        move down / up"),
         Line::from("  PgDn / PgUp  page down / up"),
-        Line::from("  Home / End   first / last row"),
+        Line::from("  gg / G       first / last row"),
+        Line::from("  Home / End   first / last row (alias)"),
         Line::from("  l / h        expand / collapse (h folds up when closed)"),
         Line::from("  Enter        toggle  (on a leaf, toggles its parent)"),
         Line::from("  Space        toggle checkbox  (goals view; writes back)"),
-        Line::from("  g            toggle git blame (inline view)"),
+        Line::from("  b            toggle git blame (inline view)"),
         Line::from("  e            edit file at cursor"),
         Line::from("  Tab          switch Goals <-> Inline Tasks"),
         Line::from(""),
@@ -470,6 +503,13 @@ struct App {
     show_stats: bool,
     show_blame: bool,
     pending_edit: Option<(PathBuf, usize)>,
+    /// Half-entered chord prefix (e.g. the first `g` of `gg`). `None` means a
+    /// single-key press is expected; `Some('g')` means we are waiting for the
+    /// second key of the `gg` chord. Cleared on completion, on an unrelated
+    /// next key (swallowed, vim-style), or when `prefix_deadline` elapses.
+    pending_prefix: Option<char>,
+    /// When a `pending_prefix` should auto-expire to avoid a stuck chord.
+    prefix_deadline: Option<Instant>,
     /// Visible content rows in the active view's list (set during draw), used
     /// to size page-up / page-down jumps.
     viewport_height: usize,
@@ -539,6 +579,8 @@ impl App {
             show_stats: false,
             show_blame: false,
             pending_edit: None,
+            pending_prefix: None,
+            prefix_deadline: None,
             viewport_height: 0,
         }
     }
@@ -877,7 +919,7 @@ impl App {
         }
     }
 
-    /// `g`: toggle blame annotations on inline task rows.
+    /// `b`: toggle blame annotations on inline task rows.
     fn toggle_blame(&mut self) {
         self.show_blame = !self.show_blame;
         self.goal_rows = flatten_goals(&self.goals, &self.goal_expanded, self.show_blame);

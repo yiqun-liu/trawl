@@ -273,7 +273,7 @@ checkbox tree (milestones, tasks, sub-tasks).
 │ ▸ Understanding Linux VM Manager  misc/books/  [========-]  90%│
 │ ▸ Sprint 15: Auth Refactor       (root)     [=======--]  55%   │
 ├──────────────────────────────────────────────────────────────┤
-│ Enter: toggle  l: expand  h: collapse  Space: ✓  g: blame  e: edit  S: stats │
+│ Enter: toggle  l: expand  h: collapse  Space: ✓  b: blame  e: edit  S: stats │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -310,7 +310,7 @@ description, and optional priority badge.
 │     ▸ memory-management/  [19]                               │
 │ ▼ tool/  [33]                                                │
 ├──────────────────────────────────────────────────────────────┤
-│ Enter: expand  f: filter  s: sort  g: blame  Tab: Goals  q: quit       │
+│ Enter: expand  f: filter  s: sort  b: blame  Tab: Goals  q: quit       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -320,7 +320,7 @@ description, and optional priority badge.
 - Item counts `[N]` next to each dir/file node
 - Inline preview of each task with line number and keyword
 - Color coding: priority (red/yellow/gray), keyword (cyan/red/etc.)
-- Optional git blame line (toggle with `g`)
+- Optional git blame line (toggle with `b`)
 - Auto-expand directories containing high-priority tasks
 
 ### Inline Expansion
@@ -392,7 +392,7 @@ Blame data is stored on each [`InlineTask`]:
 - `blame_commit: Option<String>` — short commit hash (8 chars), or `None`
 
 Enrichment only runs when `display.show_git_blame = true` (default: `true`).
-A TUI `g` key toggles blame annotations on inline task rows and goal items.
+A TUI `b` key toggles blame annotations on inline task rows and goal items.
 
 #### Age and stale detection
 
@@ -435,11 +435,12 @@ keybindings — the overlay adapts.
 ├──────────────────────────────────────────────────┤
 │  Navigation                                      │
 │    j / k        move down / up                   │
+│    gg / G       first / last row                 │
 │    l / h        expand / collapse                │
 │    Enter        toggle expand (inline context)   │
 │    Space        toggle checkbox (in goals)       │
 │    Tab          switch Goals ↔ Inline Tasks      │
-│    g            toggle git blame                 │
+│    b            toggle git blame                 │
 │                                                  │
 │  Filtering & Sorting                             │
 │    f            filter prompt (kw: pri: tag: …)  │
